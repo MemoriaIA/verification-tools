@@ -2,6 +2,8 @@
 
 Independent cryptographic verification for MemoriaIA vault integrity.
 
+> **Engineering in progress.** MemoriaIA is under active development. The architecture is real, the cryptography is real — but the product is not yet ready for public release. We ship when the engineering is complete, not before. Follow progress at [alekore.ai](https://alekore.ai).
+
 These tools allow any third party to verify that a MemoriaIA vault has not been tampered with, records have not been deleted or reordered, and the hash chain is intact — without any decryption key, without vendor cooperation, and without access to any proprietary product code.
 
 **The product is proprietary. The proof is public.**
@@ -41,8 +43,8 @@ The following are explicitly excluded and will never appear here:
 
 ## Verification Model
 
-These tools verify the SHA-256 chain over the canonical record payloads as stored in the MemoriaIA vault.  
-Verification is performed directly against the persisted record representation in the SQLite vault file.  
+These tools verify the SHA-256 chain over the canonical record payloads as stored in the MemoriaIA vault.
+Verification is performed directly against the persisted record representation in the SQLite vault file.
 No decryption key, no vendor cooperation, and no proprietary product code are required.
 
 The `payload` field in the vault stores the encrypted representation of the memory record as it was written by the product. The hash chain is constructed over this **encrypted string as stored** — not over any decrypted plaintext. This means:
@@ -181,7 +183,7 @@ See [SECURITY.md](SECURITY.md) for the vulnerability disclosure policy and scope
 
 ## About Alekore
 
-MemoriaIA is built by Alekore. Alekore builds tools for memory, trust, and personal data sovereignty.
+MemoriaIA is built by [Alekore](https://alekore.ai). Alekore builds tools for memory, trust, and personal data sovereignty.
 
 This repository is maintained as a public accountability surface for the cryptographic integrity claims made by the MemoriaIA product.
 
