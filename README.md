@@ -107,9 +107,8 @@ The genesis record uses a `prev_hash` of 64 zero characters:
 ### Prerequisites
 
 **Python verification:**
-```bash
-pip install -r verify/requirements.txt   # only: standard library (no extra deps)
-```
+
+No installation required — uses the Python standard library only.
 
 **Bash verification:**
 ```bash
