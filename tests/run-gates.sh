@@ -71,6 +71,76 @@ TAIL="$WORK/tail.sqlite";          build_db "$TAIL"
 exec_sql "$TAIL" "DROP TRIGGER IF EXISTS prevent_vault_delete; DELETE FROM vault_entries WHERE sequence=3;"
 CORRUPT="$WORK/corrupt.bin";       printf 'this is definitely not a sqlite database' > "$CORRUPT"
 NOTABLE="$WORK/notable.sqlite";    exec_sql "$NOTABLE" "CREATE TABLE other(x);"
+PIPE_PAYLOAD="$WORK/pipe-payload.sqlite"
+CONTROL_PAYLOAD="$WORK/control-payload.sqlite"
+GAP="$WORK/gap.sqlite"
+REWRITE="$WORK/rewrite.sqlite"
+if ! "$PY" - "$PYV" "$PIPE_PAYLOAD" "$CONTROL_PAYLOAD" "$GAP" "$REWRITE" <<'PY'
+import importlib.util
+import sqlite3
+import sys
+
+verifier_path, pipe_db, control_db, gap_db, rewrite_db = sys.argv[1:6]
+spec = importlib.util.spec_from_file_location("verify_hashchain", verifier_path)
+verifier = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(verifier)
+
+schema = """
+CREATE TABLE vault_entries (
+  id TEXT NOT NULL PRIMARY KEY,
+  sequence INTEGER NOT NULL UNIQUE CHECK (sequence >= 1),
+  timestamp TEXT NOT NULL,
+  authority_source TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  prev_hash TEXT NOT NULL CHECK (length(prev_hash) = 64 AND prev_hash NOT GLOB '*[^0-9a-f]*'),
+  hash TEXT NOT NULL CHECK (length(hash) = 64 AND hash NOT GLOB '*[^0-9a-f]*')
+);
+"""
+
+def make_row(seq, payload, prev_hash):
+    row = {
+        "id": f"row-{seq}",
+        "sequence": seq,
+        "timestamp": f"2026-07-03T00:00:0{seq}Z",
+        "authority_source": "system",
+        "entity_type": "memory.created",
+        "payload": payload,
+        "prev_hash": prev_hash,
+    }
+    row["hash"] = verifier.compute_record_hash(row)
+    return row
+
+def write_db(path, rows):
+    conn = sqlite3.connect(path)
+    conn.executescript(schema)
+    conn.executemany(
+        "INSERT INTO vault_entries (id, sequence, timestamp, authority_source, entity_type, payload, prev_hash, hash) VALUES (:id, :sequence, :timestamp, :authority_source, :entity_type, :payload, :prev_hash, :hash)",
+        rows,
+    )
+    conn.commit()
+    conn.close()
+
+def chain(payloads, sequence_values=None):
+    rows = []
+    prev = "0" * 64
+    if sequence_values is None:
+        sequence_values = list(range(1, len(payloads) + 1))
+    for seq, payload in zip(sequence_values, payloads):
+        row = make_row(seq, payload, prev)
+        rows.append(row)
+        prev = row["hash"]
+    return rows
+
+write_db(pipe_db, chain(["cipher|text"]))
+write_db(control_db, chain(["a\bb"]))
+write_db(gap_db, chain(["kept-first", "kept-third"], [1, 3]))
+write_db(rewrite_db, chain(["rewritten-first", "rewritten-second"]))
+PY
+then
+  echo "SETUP FAIL: could not build edge-case fixtures"
+  exit 2
+fi
 
 # ---- G-1/G-2: syntax -----------------------------------------------------
 echo "[syntax]"
@@ -88,6 +158,10 @@ rc=$(run_py "$TAMPER");  assert_exit "G-5 py tamper exit1" 1 "$rc"; assert_conta
 rc=$(run_py "$TAIL");    assert_exit "G-6 py tail exit0" 0 "$rc";   assert_contains "G-6 py tail count (known limitation)" "2 record" "$OUT"
 rc=$(run_py "$CORRUPT"); assert_exit "G-7 py corrupt exit2" 2 "$rc"
 rc=$(run_py "$NOTABLE"); assert_exit "G-8 py missing-table exit2" 2 "$rc"
+rc=$(run_py "$PIPE_PAYLOAD"); assert_exit "G-8a py pipe payload exit0" 0 "$rc"
+rc=$(run_py "$CONTROL_PAYLOAD"); assert_exit "G-8b py control-char payload exit0" 0 "$rc"
+rc=$(run_py "$GAP"); assert_exit "G-8c py sequence gap exit1" 1 "$rc"; assert_contains "G-8c py sequence gap diagnostic" "SEQUENCE GAP" "$OUT"
+rc=$(run_py "$REWRITE"); assert_exit "G-8d py self-consistent rewrite limitation exit0" 0 "$rc"; assert_contains "G-8d py rewrite count" "2 record" "$OUT"
 
 # ---- Bash verifier contract (G-9..G-12) ----------------------------------
 echo "[bash verifier]"
@@ -96,18 +170,31 @@ rc=$(run_sh "$TAMPER");  assert_exit "G-10 sh tamper exit1" 1 "$rc"; assert_cont
 rc=$(run_sh "$TAIL");    assert_exit "G-11 sh tail exit0" 0 "$rc";   assert_contains "G-11 sh tail count (known limitation)" "2 record" "$OUT"
 rc=$(run_sh "$CORRUPT"); assert_exit "G-12a sh corrupt exit2" 2 "$rc"
 rc=$(run_sh "$NOTABLE"); assert_exit "G-12b sh missing-table exit2" 2 "$rc"
+rc=$(run_sh "$PIPE_PAYLOAD"); assert_exit "G-12c sh pipe payload exit0" 0 "$rc"
+rc=$(run_sh "$CONTROL_PAYLOAD"); assert_exit "G-12d sh control-char payload exit0" 0 "$rc"
+rc=$(run_sh "$GAP"); assert_exit "G-12e sh sequence gap exit1" 1 "$rc"; assert_contains "G-12e sh sequence gap diagnostic" "SEQUENCE GAP" "$OUT"
+rc=$(run_sh "$REWRITE"); assert_exit "G-12f sh self-consistent rewrite limitation exit0" 0 "$rc"; assert_contains "G-12f sh rewrite count" "2 record" "$OUT"
 
 # ---- G-13: both verifiers agree on the valid fixture ---------------------
 echo "[cross-check]"
 prc=$(run_py "$VALID"); src=$(run_sh "$VALID")
 if [ "$prc" -eq 0 ] && [ "$src" -eq 0 ]; then pass "G-13 both verifiers accept valid fixture"; else fail "G-13 verifier agreement" "python exit $prc, bash exit $src"; fi
 
+mkdir -p "$WORK/bin"
+cat > "$WORK/bin/python3" <<PY3
+#!/usr/bin/env bash
+exec "$PY" "\$@"
+PY3
+chmod +x "$WORK/bin/python3"
+PATH="$WORK/bin:/usr/bin:/bin" bash "$SHV" "$VALID" >"$OUT" 2>&1
+assert_exit "G-13b bash resolves python3-only PATH" 0 "$?"
+
 # ---- G-14: .gitignore excludes .claude/ ----------------------------------
 echo "[repo hygiene]"
 git check-ignore -v .claude/test >/dev/null 2>&1 && pass "G-14 .gitignore .claude/" || fail "G-14 .gitignore .claude/" ".claude/ not ignored"
 
 # ---- G-15: no forbidden claim phrases in public docs ---------------------
-FORBIDDEN='certified|certification|compliant|court-admissible|legally binding|enterprise-ready|production-ready|public-ready|audit-passed|proves truth|tamper-proof|proves no deletion|proves (vault )?completeness|CISO|NASA'
+FORBIDDEN='certified|certification|compliant|court-admissible|legally binding|enterprise-ready|production-ready|public-ready|audit-passed|proves truth|tamper-proof|proves no deletion|proves (vault )?completeness|any alteration|detect any tampering|interior deletion|append-only proof|historical record.*detectable|CISO|NASA'
 HIT="$(grep -inE "$FORBIDDEN" README.md DISCLAIMER.md SECURITY.md 2>/dev/null || true)"
 if [ -z "$HIT" ]; then pass "G-15 no forbidden claims"; else fail "G-15 forbidden claim" "$(printf '%s' "$HIT" | tr '\n' ';')"; fi
 

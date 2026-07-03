@@ -28,8 +28,8 @@ CREATE TABLE IF NOT EXISTS vault_entries (
     id               TEXT NOT NULL PRIMARY KEY,
 
     -- Monotonically increasing sequence number within this vault.
-    -- Included in hash. Sequence gaps require investigation and are not
-    -- currently enforced by this verifier as a hard failure.
+    -- Included in hash. The verifier requires sequences to be contiguous from
+    -- 1 through the number of rows returned by the snapshot query.
     sequence         INTEGER NOT NULL UNIQUE CHECK (sequence >= 1),
 
     -- ISO 8601 timestamp of when the record was written.
@@ -54,12 +54,18 @@ CREATE TABLE IF NOT EXISTS vault_entries (
     -- SHA-256 hash of the previous record's canonical representation.
     -- For the genesis record (sequence = 1), this is 64 zero characters.
     -- Included in hash.
-    prev_hash        TEXT NOT NULL CHECK (length(prev_hash) = 64),
+    prev_hash        TEXT NOT NULL CHECK (
+        length(prev_hash) = 64
+        AND prev_hash NOT GLOB '*[^0-9a-f]*'
+    ),
 
     -- SHA-256 hash of this record's canonical representation (self-referential).
     -- Computed by the writer and stored for fast verification.
     -- NOT included in the hash input (would be circular).
-    hash             TEXT NOT NULL CHECK (length(hash) = 64)
+    hash             TEXT NOT NULL CHECK (
+        length(hash) = 64
+        AND hash NOT GLOB '*[^0-9a-f]*'
+    )
 );
 
 -- Verification order index. Supports sequential traversal without a full scan.

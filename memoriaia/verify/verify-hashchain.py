@@ -9,7 +9,7 @@ Usage:
 This script requires only the Python standard library (no dependencies).
 
 Verification model:
-    Each record's hash is computed over a canonical JSON (RFC 8785 / JCS)
+    Each record's hash is computed over a deterministic local canonical JSON
     representation of six fields: sequence, timestamp, authority_source,
     entity_type, payload, and prev_hash.
 
@@ -37,11 +37,16 @@ import unicodedata
 
 GENESIS_PREV_HASH = "0" * 64
 EXPECTED_PREV_HASH_FOR_SEQ1 = GENESIS_PREV_HASH
+LOWER_HEX64 = set("0123456789abcdef")
+
+
+def is_lower_hex64(value: object) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(c in LOWER_HEX64 for c in value)
 
 
 def canonical_json(obj) -> str:
     """
-    Serialize obj to canonical JSON per RFC 8785 / JCS:
+    Serialize obj to deterministic local canonical JSON:
     - Object keys sorted alphabetically at all levels
     - No extra whitespace
     - NFC Unicode normalization on all string values
@@ -57,7 +62,11 @@ def canonical_json(obj) -> str:
             + "}"
         )
     if isinstance(obj, str):
-        return f'"{_escape(unicodedata.normalize("NFC", obj))}"'
+        return json.dumps(
+            unicodedata.normalize("NFC", obj),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
     if isinstance(obj, bool):
         return "true" if obj else "false"
     if isinstance(obj, int):
@@ -72,14 +81,12 @@ def canonical_json(obj) -> str:
 
 
 def _escape(s: str) -> str:
-    """Minimal JSON string escaping (handles control chars and special chars)."""
-    return (
-        s.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-        .replace("\t", "\\t")
-    )
+    """JSON-escape an object key after NFC normalization."""
+    return json.dumps(
+        unicodedata.normalize("NFC", s),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )[1:-1]
 
 
 def compute_record_hash(row: dict) -> str:
@@ -150,6 +157,10 @@ def verify_vault(vault_path: str, verbose: bool = False) -> bool:
 
         prefix = f"  [{i}/{total}] seq={seq}"
 
+        sequence_ok = seq == i
+        stored_hash_format_ok = is_lower_hex64(stored_hash)
+        prev_hash_format_ok = is_lower_hex64(row["prev_hash"])
+
         # Check 1: stored hash matches computed hash
         hash_ok = stored_hash == computed_hash
 
@@ -161,7 +172,7 @@ def verify_vault(vault_path: str, verbose: bool = False) -> bool:
 
         link_ok = row["prev_hash"] == expected_prev
 
-        if hash_ok and link_ok:
+        if hash_ok and link_ok and sequence_ok and stored_hash_format_ok and prev_hash_format_ok:
             if verbose:
                 print(f"{prefix}  hash={stored_hash[:16]}...  ✓ OK")
             else:
@@ -169,6 +180,16 @@ def verify_vault(vault_path: str, verbose: bool = False) -> bool:
                 print(f"{prefix}  {status}")
         else:
             valid = False
+            if not sequence_ok:
+                print(f"{prefix}  ✗ SEQUENCE GAP OR REORDERING")
+                print(f"    expected sequence: {i}")
+                print(f"    stored sequence:   {seq}")
+            if not stored_hash_format_ok:
+                print(f"{prefix}  ✗ STORED HASH FORMAT INVALID")
+                print(f"    stored:   {stored_hash}")
+            if not prev_hash_format_ok:
+                print(f"{prefix}  ✗ PREV_HASH FORMAT INVALID")
+                print(f"    stored:   {row['prev_hash']}")
             if not hash_ok:
                 print(f"{prefix}  ✗ HASH MISMATCH")
                 print(f"    stored:   {stored_hash}")
