@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # run-gates.sh — Regression gate suite for the verification-tools proof surface.
 #
-# Runs G-1..G-10. Confirms the Python verifier works, the .gitignore functions,
-# the README contains no forbidden claims, DISCLAIMER.md is present, and — most
-# importantly — that the documented known limitation (tail truncation passing as
-# VALID) is empirically confirmed rather than an error.
+# Exercises BOTH advertised verifiers (Python and bash) and asserts the exact
+# exit-code contract (0=valid, 1=invalid, 2=environment/usage error), not merely
+# "nonzero". Also confirms the .gitignore works, the README makes no forbidden
+# claims, DISCLAIMER.md exists AND is linked, the known limitation (tail
+# truncation -> valid) holds, and no vault data / keys leak into tracked files.
 #
 # Usage:  bash tests/run-gates.sh
-# Exit:   0 if all hard gates pass; nonzero on the first hard-gate failure.
+# Exit:   0 iff every gate passes; 1 if any gate fails; 2 on setup failure.
 #
-# Portability: prefers python3, falls back to python. The repo targets Python
-# 3.8+ (standard library only); some Windows installs expose only "python".
-# PYTHONIOENCODING=utf-8 is exported so the verifier's output never depends on
-# the console code page (this mirrors the F-2 fix and keeps gates deterministic).
+# Portability: prefers python3, falls back to python (repo targets 3.8+, stdlib
+# only). PYTHONIOENCODING=utf-8 keeps verifier output independent of the console
+# code page.
 
 set -u
 
@@ -20,87 +20,121 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT"
 
-# --- portable Python interpreter resolution ---
 PY="$(command -v python3 || true)"
 [ -z "$PY" ] && PY="$(command -v python || true)"
-[ -z "$PY" ] && { echo "FATAL: no python3/python interpreter on PATH"; exit 2; }
+[ -z "$PY" ] && { echo "SETUP FAIL: no python3/python interpreter on PATH"; exit 2; }
 export PYTHONIOENCODING=utf-8
 
-VERIFIER="memoriaia/verify/verify-hashchain.py"
+PYV="memoriaia/verify/verify-hashchain.py"
+SHV="memoriaia/verify/verify-hashchain.sh"
 FIXTURE="memoriaia/fixtures/example-vault.sql"
 ZERO64="0000000000000000000000000000000000000000000000000000000000000000"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
+OUT="$WORK/out.txt"
+FAILED=0
 
 echo "== verification-tools gate suite =="
 echo "python:   $PY"
-echo "verifier: $VERIFIER"
+echo "verifiers: $PYV , $SHV"
 echo
 
-# G-1: Python syntax check
-"$PY" -m py_compile "$VERIFIER" && echo "G-1 PASS" || { echo "G-1 FAIL"; exit 1; }
+# ---- helpers -------------------------------------------------------------
+fail() { echo "  $1: FAIL - $2"; FAILED=1; }
+pass() { echo "  $1: PASS ${2:-}"; }
 
-# G-2: Fixture loads into SQLite (suppress the PRAGMA journal_mode echo)
-sqlite3 "$WORK/gates-vault.sqlite" < "$FIXTURE" >/dev/null && echo "G-2 PASS" || { echo "G-2 FAIL"; exit 1; }
+assert_exit() { # label expected actual
+  if [ "$3" -eq "$2" ]; then pass "$1" "(exit $3)"; else fail "$1" "expected exit $2, got $3"; fi
+}
+assert_contains() { # label needle file
+  if grep -qF -- "$2" "$3"; then pass "$1" "(found \"$2\")"; else fail "$1" "output missing \"$2\""; fi
+}
 
-# G-3: Verifier PASS on valid fixture (exit 0)
-"$PY" "$VERIFIER" --vault "$WORK/gates-vault.sqlite" >/dev/null && echo "G-3 PASS" || { echo "G-3 FAIL"; exit 1; }
+build_db() { # target < fixture ; hard-stop on failure (no silent setup)
+  sqlite3 "$1" < "$FIXTURE" >/dev/null 2>&1 || { echo "SETUP FAIL: could not load fixture into $1"; exit 2; }
+}
+exec_sql() { # db sql ; hard-stop on failure
+  sqlite3 "$1" "$2" >/dev/null 2>&1 || { echo "SETUP FAIL: sql failed on $1"; exit 2; }
+}
 
-# G-4: Verifier FAIL on tampered interior record (nonzero exit).
-# The fixture installs append-only triggers, so the UPDATE trigger is dropped
-# first to simulate an attacker who bypassed enforcement at the DB layer —
-# exactly the scenario the README says the hash chain still detects.
-sqlite3 "$WORK/gates-tampered.sqlite" < "$FIXTURE" >/dev/null
-sqlite3 "$WORK/gates-tampered.sqlite" \
-  "DROP TRIGGER IF EXISTS prevent_vault_update; UPDATE vault_entries SET hash='$ZERO64' WHERE sequence=2;" >/dev/null
-if "$PY" "$VERIFIER" --vault "$WORK/gates-tampered.sqlite" >/dev/null 2>&1; then
-  echo "G-4 FAIL (tampered vault passed as valid)"; exit 1
+run_py() { "$PY" "$PYV" --vault "$1" >"$OUT" 2>&1; echo $?; }
+run_sh() { bash "$SHV" "$1" >"$OUT" 2>&1; echo $?; }
+
+# ---- fixtures ------------------------------------------------------------
+VALID="$WORK/valid.sqlite";        build_db "$VALID"
+TAMPER="$WORK/tamper.sqlite";      build_db "$TAMPER"
+exec_sql "$TAMPER" "DROP TRIGGER IF EXISTS prevent_vault_update; UPDATE vault_entries SET hash='$ZERO64' WHERE sequence=2;"
+TAIL="$WORK/tail.sqlite";          build_db "$TAIL"
+exec_sql "$TAIL" "DROP TRIGGER IF EXISTS prevent_vault_delete; DELETE FROM vault_entries WHERE sequence=3;"
+CORRUPT="$WORK/corrupt.bin";       printf 'this is definitely not a sqlite database' > "$CORRUPT"
+NOTABLE="$WORK/notable.sqlite";    exec_sql "$NOTABLE" "CREATE TABLE other(x);"
+
+# ---- G-1/G-2: syntax -----------------------------------------------------
+echo "[syntax]"
+"$PY" -m py_compile "$PYV" 2>/dev/null && pass "G-1 python syntax" || fail "G-1 python syntax" "py_compile failed"
+bash -n "$SHV" 2>/dev/null && pass "G-2 bash syntax" || fail "G-2 bash syntax" "bash -n failed"
+
+# ---- G-3: fixture loads --------------------------------------------------
+echo "[fixture]"
+sqlite3 "$WORK/g3.sqlite" < "$FIXTURE" >/dev/null 2>&1 && pass "G-3 fixture loads" || fail "G-3 fixture loads" "load failed"
+
+# ---- Python verifier contract (G-4..G-8) ---------------------------------
+echo "[python verifier]"
+rc=$(run_py "$VALID");   assert_exit "G-4 py valid exit0" 0 "$rc"; assert_contains "G-4 py valid says VALID" "Chain VALID" "$OUT"; assert_contains "G-4 py valid count" "3 record" "$OUT"
+rc=$(run_py "$TAMPER");  assert_exit "G-5 py tamper exit1" 1 "$rc"; assert_contains "G-5 py tamper says INVALID" "Chain INVALID" "$OUT"
+rc=$(run_py "$TAIL");    assert_exit "G-6 py tail exit0" 0 "$rc";   assert_contains "G-6 py tail count (known limitation)" "2 record" "$OUT"
+rc=$(run_py "$CORRUPT"); assert_exit "G-7 py corrupt exit2" 2 "$rc"
+rc=$(run_py "$NOTABLE"); assert_exit "G-8 py missing-table exit2" 2 "$rc"
+
+# ---- Bash verifier contract (G-9..G-12) ----------------------------------
+echo "[bash verifier]"
+rc=$(run_sh "$VALID");   assert_exit "G-9 sh valid exit0" 0 "$rc"; assert_contains "G-9 sh valid says VALID" "Chain VALID" "$OUT"; assert_contains "G-9 sh valid count" "3 record" "$OUT"
+rc=$(run_sh "$TAMPER");  assert_exit "G-10 sh tamper exit1" 1 "$rc"; assert_contains "G-10 sh tamper says INVALID" "Chain INVALID" "$OUT"
+rc=$(run_sh "$TAIL");    assert_exit "G-11 sh tail exit0" 0 "$rc";   assert_contains "G-11 sh tail count (known limitation)" "2 record" "$OUT"
+rc=$(run_sh "$CORRUPT"); assert_exit "G-12a sh corrupt exit2" 2 "$rc"
+rc=$(run_sh "$NOTABLE"); assert_exit "G-12b sh missing-table exit2" 2 "$rc"
+
+# ---- G-13: both verifiers agree on the valid fixture ---------------------
+echo "[cross-check]"
+prc=$(run_py "$VALID"); src=$(run_sh "$VALID")
+if [ "$prc" -eq 0 ] && [ "$src" -eq 0 ]; then pass "G-13 both verifiers accept valid fixture"; else fail "G-13 verifier agreement" "python exit $prc, bash exit $src"; fi
+
+# ---- G-14: .gitignore excludes .claude/ ----------------------------------
+echo "[repo hygiene]"
+git check-ignore -v .claude/test >/dev/null 2>&1 && pass "G-14 .gitignore .claude/" || fail "G-14 .gitignore .claude/" ".claude/ not ignored"
+
+# ---- G-15: no forbidden claim phrases in public docs ---------------------
+FORBIDDEN='certified|certification|compliant|court-admissible|legally binding|enterprise-ready|production-ready|public-ready|audit-passed|proves truth|tamper-proof|proves no deletion|proves (vault )?completeness|CISO|NASA'
+HIT="$(grep -inE "$FORBIDDEN" README.md DISCLAIMER.md SECURITY.md 2>/dev/null || true)"
+if [ -z "$HIT" ]; then pass "G-15 no forbidden claims"; else fail "G-15 forbidden claim" "$(printf '%s' "$HIT" | tr '\n' ';')"; fi
+
+# ---- G-16: DISCLAIMER.md exists AND is discoverable ----------------------
+if [ -f DISCLAIMER.md ]; then
+  if grep -iE "DISCLAIMER\.md" README.md >/dev/null 2>&1; then pass "G-16 DISCLAIMER exists & linked"; else fail "G-16 DISCLAIMER link" "DISCLAIMER.md exists but is not linked from README.md"; fi
 else
-  echo "G-4 PASS (interior tampering detected, nonzero exit)"
+  fail "G-16 DISCLAIMER exists" "DISCLAIMER.md missing"
 fi
 
-# G-5: Tail-truncated vault exits 0 and does NOT claim completeness.
-# Build a 2-of-3 vault (newest record removed). The remaining chain is still
-# internally consistent -> exit 0. This confirms the documented known
-# limitation is real behaviour, not a bug.
-sqlite3 "$WORK/gates-tail-truncated.sqlite" < "$FIXTURE" >/dev/null
-sqlite3 "$WORK/gates-tail-truncated.sqlite" \
-  "DROP TRIGGER IF EXISTS prevent_vault_delete; DELETE FROM vault_entries WHERE sequence=3;" >/dev/null
-if "$PY" "$VERIFIER" --vault "$WORK/gates-tail-truncated.sqlite" >/dev/null; then
-  echo "G-5 EXPECTED PASS (known limitation confirmed: tail truncation undetectable)"
+# ---- G-17: no phantom requirements.txt -----------------------------------
+[ ! -f memoriaia/verify/requirements.txt ] && pass "G-17 no phantom requirements.txt" || fail "G-17 phantom requirements.txt" "unexpected requirements.txt present"
+
+# ---- G-18: no leakage — allowlist + sensitive-pattern denylist (hard fail)
+ALLOWED='^(README\.md|SECURITY\.md|DISCLAIMER\.md|LICENSE|\.gitignore|memoriaia/schema/[A-Za-z0-9._-]+\.sql|memoriaia/fixtures/[A-Za-z0-9._-]+\.sql|memoriaia/verify/verify-hashchain\.(py|sh)|tests/run-gates\.sh)$'
+UNEXPECTED="$(git ls-files | grep -vE "$ALLOWED" || true)"
+SENSITIVE="$(git ls-files | grep -iE '\.(sqlite|sqlite3|db|pem|key|env|p12|pfx|crt)$|(^|/)id_(rsa|ed25519)' || true)"
+if [ -z "$UNEXPECTED" ] && [ -z "$SENSITIVE" ]; then
+  pass "G-18 no leakage (tracked file set is the known allowlist)"
 else
-  echo "G-5 UNEXPECTED FAIL (truncated-but-consistent vault should verify)"; exit 1
-fi
-
-# G-6: .gitignore actually excludes .claude/
-git check-ignore -v .claude/test >/dev/null && echo "G-6 PASS" || { echo "G-6 FAIL: .gitignore not working"; exit 1; }
-
-# G-7: No forbidden claim phrases in README.md
-if grep -iE "certified|compliant|court-admissible|legally binding|enterprise-ready|production-ready|audit-passed|proves truth" README.md >/dev/null; then
-  echo "G-7 FAIL: forbidden phrase found"; exit 1
-else
-  echo "G-7 PASS"
-fi
-
-# G-8: DISCLAIMER.md exists
-test -f DISCLAIMER.md && echo "G-8 PASS" || { echo "G-8 FAIL"; exit 1; }
-
-# G-9: no phantom requirements.txt
-if [ ! -f memoriaia/verify/requirements.txt ]; then
-  echo "G-9 PASS (no phantom file)"
-else
-  echo "G-9 NOTE: requirements.txt present, verify content"
-fi
-
-# G-10: No unexpected tracked file types (no vault data, private keys, EEE
-# artifacts). LICENSE is the one legitimate extensionless tracked file.
-UNEXPECTED="$(git ls-files | grep -vE '\.(sql|py|sh|md|txt|gitignore)$' | grep -vE '(^|/)LICENSE$' || true)"
-if [ -n "$UNEXPECTED" ]; then
-  echo "G-10 WARN: unexpected file types:"; echo "$UNEXPECTED"
-else
-  echo "G-10 PASS"
+  [ -n "$UNEXPECTED" ] && fail "G-18 unexpected tracked file(s)" "$(printf '%s' "$UNEXPECTED" | tr '\n' ';')"
+  [ -n "$SENSITIVE" ]  && fail "G-18 sensitive tracked file(s)"  "$(printf '%s' "$SENSITIVE"  | tr '\n' ';')"
 fi
 
 echo
-echo "ALL GATES COMPLETE"
+if [ "$FAILED" -eq 0 ]; then
+  echo "ALL GATES PASS"
+  exit 0
+else
+  echo "GATE FAILURE(S) DETECTED"
+  exit 1
+fi
