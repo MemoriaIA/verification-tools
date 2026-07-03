@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS vault_entries (
     id               TEXT NOT NULL PRIMARY KEY,
 
     -- Monotonically increasing sequence number within this vault.
-    -- Included in hash. Gaps indicate tampering.
+    -- Included in hash. Sequence gaps require investigation and are not
+    -- currently enforced by this verifier as a hard failure.
     sequence         INTEGER NOT NULL UNIQUE CHECK (sequence >= 1),
 
     -- ISO 8601 timestamp of when the record was written.

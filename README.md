@@ -114,8 +114,9 @@ No installation required — uses the Python standard library only.
 
 **Bash verification:**
 ```bash
-# Requires: sqlite3, python (for sha256sum with canonical JSON), or openssl
-# See memoriaia/verify/verify-hashchain.sh for full requirements comment
+# Requires: sqlite3 (CLI) and python 3.8+ (standard library only).
+# The bash verifier delegates canonical-JSON + SHA-256 hashing to python.
+# See memoriaia/verify/verify-hashchain.sh for the full requirements comment.
 ```
 
 ### Python verification
@@ -128,9 +129,10 @@ Example output on a valid chain:
 
 ```
 Verifying hash chain in: vault.sqlite
-  [1/3] seq=1  ✓ hash OK
+  [1/3] seq=1  ✓ hash OK  genesis
   [2/3] seq=2  ✓ hash OK  prev_hash link OK
   [3/3] seq=3  ✓ hash OK  prev_hash link OK
+
 Chain VALID — 3 records verified.
 ```
 
@@ -140,8 +142,11 @@ Example output on a tampered vault:
   [2/3] seq=2  ✗ HASH MISMATCH
     stored:   77d3e0a8b0e6e47801b0ba6ce27382d6...
     computed: 4f2a91c0d8e7b3f1a6c5d2e9b8a7f0e3...
-Chain INVALID — tampering or corruption detected at sequence 2.
+
+Chain INVALID — tampering or corruption detected.
 ```
+
+(The bash verifier reports the same verdicts and exit codes; its per-record markers are ASCII — `hash OK` / `X` — so its output is legible on every console.)
 
 ### Bash verification
 
@@ -181,8 +186,14 @@ The triggers alone do not prevent a sufficiently privileged actor from dropping 
 |---|---|
 | Database | SQLite 3.x |
 | Python verifier | Python 3.8+ (standard library only) |
-| Bash verifier | bash, sqlite3 CLI, openssl or sha256sum |
+| Bash verifier | bash, sqlite3 CLI, python 3.8+ |
 | Schema | Documented in `memoriaia/schema/vault-schema.sql` |
+
+---
+
+## Scope & Disclaimer
+
+See [DISCLAIMER.md](DISCLAIMER.md) for a precise statement of what these tools prove — the internal hash-chain consistency of a supplied vault snapshot — and, just as importantly, what they do **not** prove (including the tail-truncation limitation described under [Known Limitations](#known-limitations)).
 
 ---
 
