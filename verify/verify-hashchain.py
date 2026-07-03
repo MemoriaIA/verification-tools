@@ -185,6 +185,19 @@ def verify_vault(vault_path: str, verbose: bool = False) -> bool:
 
 
 def main() -> None:
+    # Console-encoding hardening (Windows cp1252 and other legacy code pages).
+    # The status lines below print U+2713 / U+2717 (checkmark / ballot-X). On a
+    # cp1252 console these raise UnicodeEncodeError mid-run, which — left
+    # unhandled — terminates the process with exit code 1, indistinguishable
+    # from a genuine "chain invalid" result. Reconfiguring stdout to UTF-8 makes
+    # those characters encodable; the try/except around verify_vault() below is
+    # a belt-and-suspenders guarantee that a display failure can never be
+    # reported as exit 1 (see the exit-code contract in this module's docstring).
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError, OSError):
+        pass  # Older/replaced stdout: fall through to the guard below.
+
     parser = argparse.ArgumentParser(
         description="Independent hash-chain verifier for MemoriaIA vaults."
     )
@@ -201,7 +214,18 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    ok = verify_vault(args.vault, verbose=args.verbose)
+    try:
+        ok = verify_vault(args.vault, verbose=args.verbose)
+    except UnicodeEncodeError:
+        # A console that cannot render the verifier's output is an environment
+        # problem, not a statement about chain validity. It must never collide
+        # with exit 1 ("chain invalid"); surface it as exit 2 (environment error).
+        sys.stderr.write(
+            "Error: console encoding could not render verifier output. "
+            "Re-run with PYTHONIOENCODING=utf-8.\n"
+        )
+        sys.exit(2)
+
     sys.exit(0 if ok else 1)
 
 
