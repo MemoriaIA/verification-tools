@@ -113,21 +113,25 @@ def verify_vault(vault_path: str, verbose: bool = False) -> bool:
 
     Returns True if the chain is valid, False otherwise.
     """
+    # Open AND read under one guard. sqlite3.connect(..., mode=ro) opens
+    # lazily, so a corrupt/non-SQLite file or a missing vault_entries table does
+    # not fail until the query runs. Both are environment errors ("vault cannot
+    # be opened/read") and must exit 2 — never exit 1, which means "chain
+    # invalid" and would mislabel an unreadable file as tampering.
     try:
         conn = sqlite3.connect(f"file:{vault_path}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
-    except sqlite3.OperationalError as e:
-        print(f"Error: cannot open vault: {e}", file=sys.stderr)
+        cursor = conn.execute(
+            "SELECT id, sequence, timestamp, authority_source, entity_type, "
+            "       payload, prev_hash, hash "
+            "FROM vault_entries "
+            "ORDER BY sequence ASC"
+        )
+        rows = cursor.fetchall()
+        conn.close()
+    except sqlite3.Error as e:
+        print(f"Error: cannot read vault: {e}", file=sys.stderr)
         sys.exit(2)
-
-    cursor = conn.execute(
-        "SELECT id, sequence, timestamp, authority_source, entity_type, "
-        "       payload, prev_hash, hash "
-        "FROM vault_entries "
-        "ORDER BY sequence ASC"
-    )
-    rows = cursor.fetchall()
-    conn.close()
 
     if not rows:
         print("Vault is empty — nothing to verify.")
