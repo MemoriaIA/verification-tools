@@ -26,7 +26,7 @@ PY="$(command -v python3 || true)"
 export PYTHONIOENCODING=utf-8
 
 PYV="memoriaia/verify/verify-hashchain.py"
-SHV="memoriaia/verify/verify-hashchain.sh"
+SHV="verify/verify-hashchain.sh"
 FIXTURE="memoriaia/fixtures/example-vault.sql"
 ZERO64="0000000000000000000000000000000000000000000000000000000000000000"
 
@@ -209,7 +209,7 @@ fi
 [ ! -f memoriaia/verify/requirements.txt ] && pass "G-17 no phantom requirements.txt" || fail "G-17 phantom requirements.txt" "unexpected requirements.txt present"
 
 # ---- G-18: no leakage — allowlist + sensitive-pattern denylist (hard fail)
-ALLOWED='^(README\.md|SECURITY\.md|DISCLAIMER\.md|LICENSE|\.gitignore|memoriaia/schema/[A-Za-z0-9._-]+\.sql|memoriaia/fixtures/[A-Za-z0-9._-]+\.sql|memoriaia/verify/verify-hashchain\.(py|sh)|tests/run-gates\.sh)$'
+ALLOWED='^(README\.md|SECURITY\.md|DISCLAIMER\.md|LICENSE|\.gitignore|memoriaia/schema/[A-Za-z0-9._-]+\.sql|memoriaia/fixtures/[A-Za-z0-9._-]+\.sql|memoriaia/verify/verify-hashchain\.py|verify/verify-hashchain\.sh|tests/run-gates\.sh)$'
 UNEXPECTED="$(git ls-files | grep -vE "$ALLOWED" || true)"
 SENSITIVE="$(git ls-files | grep -iE '\.(sqlite|sqlite3|db|pem|key|env|p12|pfx|crt)$|(^|/)id_(rsa|ed25519)' || true)"
 if [ -z "$UNEXPECTED" ] && [ -z "$SENSITIVE" ]; then

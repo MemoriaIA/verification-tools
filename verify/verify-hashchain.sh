@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# verify-hashchain.sh — Bash wrapper for the MemoriaIA hash-chain verifier.
+# verify-hashchain.sh — Bash compatibility wrapper for MemoriaIA vault verification.
 #
 # Usage:
 #   bash verify-hashchain.sh path/to/vault.sqlite
@@ -8,9 +8,10 @@
 #   - bash
 #   - python3 or python (3.8+)
 #
-# The Python verifier is the canonical implementation. This wrapper exists for
-# shell-first auditors and deliberately delegates the full read/parse/hash path
-# to verify-hashchain.py so bash delimiter parsing cannot diverge from Python.
+# The Python verifier under memoriaia/verify/ is the canonical implementation.
+# This wrapper exists for existing shell-first usage and deliberately delegates
+# the full read/parse/hash path to that verifier so bash delimiter parsing
+# cannot diverge from Python.
 
 set -euo pipefail
 
@@ -27,7 +28,8 @@ if [[ ! -f "$VAULT" ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PY_VERIFIER="$SCRIPT_DIR/verify-hashchain.py"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+PY_VERIFIER="$ROOT_DIR/memoriaia/verify/verify-hashchain.py"
 
 PY="${PYTHON:-}"
 if [[ -z "$PY" ]]; then

@@ -15,7 +15,7 @@ These tools allow any third party to verify the internal hash-chain consistency 
 | Claim | Enforcement | Verification |
 |---|---|---|
 | Append-only trigger definitions are public | SQL trigger definitions block UPDATE and DELETE when installed in a live database | Inspect `memoriaia/schema/append-only-triggers.sql` |
-| The supplied snapshot forms an internally consistent hash chain | Each record commits to the SHA-256 hash of its predecessor, and sequence numbers must be contiguous from 1 | Run `memoriaia/verify/verify-hashchain.py` or `memoriaia/verify/verify-hashchain.sh` |
+| The supplied snapshot forms an internally consistent hash chain | Each record commits to the SHA-256 hash of its predecessor, and sequence numbers must be contiguous from 1 | Run `memoriaia/verify/verify-hashchain.py` or the compatibility wrapper `verify/verify-hashchain.sh` |
 | Hash inputs are deterministic for the documented field set | Local canonical JSON with fixed field order and JSON string escaping | See Mathematical Specification below |
 | Verification requires no decryption | Hashes are computed over the stored (encrypted) payload string | See Verification Model below |
 
@@ -118,7 +118,7 @@ No installation required — uses the Python standard library only.
 ```bash
 # Requires: bash and python 3.8+ (standard library only).
 # The bash verifier delegates SQLite reading, canonical JSON, and SHA-256 hashing to python.
-# See memoriaia/verify/verify-hashchain.sh for the full requirements comment.
+# See verify/verify-hashchain.sh for the shell compatibility wrapper.
 ```
 
 ### Python verification
@@ -153,7 +153,7 @@ Chain INVALID — tampering or corruption detected.
 ### Bash verification
 
 ```bash
-bash memoriaia/verify/verify-hashchain.sh path/to/vault.sqlite
+bash verify/verify-hashchain.sh path/to/vault.sqlite
 ```
 
 ### Example fixture
