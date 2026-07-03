@@ -14,8 +14,8 @@ These tools allow any third party to verify the internal hash-chain consistency 
 
 | Claim | Enforcement | Verification |
 |---|---|---|
-| Records are append-only | SQL triggers block UPDATE and DELETE at the database level | Inspect `schema/append-only-triggers.sql` |
-| Records form an unbroken hash chain | Each record commits to the SHA-256 hash of its predecessor | Run `verify/verify-hashchain.py` or `verify/verify-hashchain.sh` |
+| Records are append-only | SQL triggers block UPDATE and DELETE at the database level | Inspect `memoriaia/schema/append-only-triggers.sql` |
+| Records form an unbroken hash chain | Each record commits to the SHA-256 hash of its predecessor | Run `memoriaia/verify/verify-hashchain.py` or `memoriaia/verify/verify-hashchain.sh` |
 | Hash inputs are deterministic | Canonical JSON (RFC 8785 / JCS) with fixed field order | See Mathematical Specification below |
 | Verification requires no decryption | Hashes are computed over the stored (encrypted) payload string | See Verification Model below |
 
@@ -104,6 +104,8 @@ The genesis record uses a `prev_hash` of 64 zero characters:
 
 ## Quick Start
 
+> **Repository layout (migration note).** All verification assets — schema, fixtures, and verifiers — now live under the `memoriaia/` directory. Earlier revisions kept them at the repository root (`verify/`, `schema/`, `fixtures/`); update any saved paths to the `memoriaia/` prefix. The verifier interface is unchanged — each script still takes the vault path via `--vault` (Python) or as its first argument (bash), so only the location of the scripts moved, not how you call them.
+
 ### Prerequisites
 
 **Python verification:**
@@ -113,13 +115,13 @@ No installation required — uses the Python standard library only.
 **Bash verification:**
 ```bash
 # Requires: sqlite3, python (for sha256sum with canonical JSON), or openssl
-# See verify/verify-hashchain.sh for full requirements comment
+# See memoriaia/verify/verify-hashchain.sh for full requirements comment
 ```
 
 ### Python verification
 
 ```bash
-python verify/verify-hashchain.py --vault path/to/vault.sqlite
+python memoriaia/verify/verify-hashchain.py --vault path/to/vault.sqlite
 ```
 
 Example output on a valid chain:
@@ -144,7 +146,7 @@ Chain INVALID — tampering or corruption detected at sequence 2.
 ### Bash verification
 
 ```bash
-bash verify/verify-hashchain.sh path/to/vault.sqlite
+bash memoriaia/verify/verify-hashchain.sh path/to/vault.sqlite
 ```
 
 ### Example fixture
@@ -152,8 +154,8 @@ bash verify/verify-hashchain.sh path/to/vault.sqlite
 Load and verify the bundled example:
 
 ```bash
-sqlite3 /tmp/example-vault.sqlite < fixtures/example-vault.sql
-python verify/verify-hashchain.py --vault /tmp/example-vault.sqlite
+sqlite3 /tmp/example-vault.sqlite < memoriaia/fixtures/example-vault.sql
+python memoriaia/verify/verify-hashchain.py --vault /tmp/example-vault.sqlite
 ```
 
 Expected output: chain valid, 3 records.
@@ -162,7 +164,7 @@ Expected output: chain valid, 3 records.
 
 ## Append-Only Enforcement
 
-`schema/append-only-triggers.sql` defines two SQLite triggers on the `vault_entries` table:
+`memoriaia/schema/append-only-triggers.sql` defines two SQLite triggers on the `vault_entries` table:
 
 - **`prevent_vault_update`** — raises an error if any UPDATE is attempted on an existing row.
 - **`prevent_vault_delete`** — raises an error if any DELETE is attempted on an existing row.
@@ -180,7 +182,7 @@ The triggers alone do not prevent a sufficiently privileged actor from dropping 
 | Database | SQLite 3.x |
 | Python verifier | Python 3.8+ (standard library only) |
 | Bash verifier | bash, sqlite3 CLI, openssl or sha256sum |
-| Schema | Documented in `schema/vault-schema.sql` |
+| Schema | Documented in `memoriaia/schema/vault-schema.sql` |
 
 ---
 
