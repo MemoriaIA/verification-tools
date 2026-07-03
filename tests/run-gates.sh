@@ -30,7 +30,9 @@ SHV="memoriaia/verify/verify-hashchain.sh"
 FIXTURE="memoriaia/fixtures/example-vault.sql"
 ZERO64="0000000000000000000000000000000000000000000000000000000000000000"
 
-WORK="$(mktemp -d)"
+WORK=".tmp-gates-$$"
+rm -rf "$WORK"
+mkdir "$WORK" || { echo "SETUP FAIL: could not create $WORK"; exit 2; }
 trap 'rm -rf "$WORK"' EXIT
 OUT="$WORK/out.txt"
 FAILED=0

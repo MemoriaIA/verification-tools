@@ -112,6 +112,11 @@ while IFS='|' read -r seq ts auth etype payload prev stored_hash; do
         echo "Error: could not compute record hash — is python available?" >&2
         exit 2
     fi
+    # When Git Bash invokes Windows Python, command substitution may preserve a
+    # trailing CR from CRLF stdout. Normalize that display artifact before the
+    # byte-for-byte hash comparison so Windows shells do not false-fail valid
+    # vaults.
+    COMPUTED="${COMPUTED%$'\r'}"
 
     # Check stored hash matches computed hash
     HASH_OK=1
