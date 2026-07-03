@@ -4,7 +4,7 @@ Independent cryptographic verification for MemoriaIA vault integrity.
 
 > **Engineering in progress.** MemoriaIA is under active development. The architecture is real, the cryptography is real — but the product is not yet ready for public release. We ship when the engineering is complete, not before. Follow progress at [alekore.ai](https://alekore.ai).
 
-These tools allow any third party to verify that a MemoriaIA vault has not been tampered with, records have not been deleted or reordered, and the hash chain is intact — without any decryption key, without vendor cooperation, and without access to any proprietary product code.
+These tools allow any third party to verify the internal hash-chain consistency of a supplied MemoriaIA vault snapshot — that each record's stored hash matches the canonical representation of its fields, and that each record's `prev_hash` equals the hash of the preceding record — without any decryption key, without vendor cooperation, and without access to any proprietary product code. Interior deletion, insertion, reordering, and modification of records are all detectable this way. See [Known Limitations](#known-limitations) for what a single-snapshot hash chain cannot prove (notably tail truncation).
 
 **The product is proprietary. The proof is public.**
 
@@ -18,6 +18,16 @@ These tools allow any third party to verify that a MemoriaIA vault has not been 
 | Records form an unbroken hash chain | Each record commits to the SHA-256 hash of its predecessor | Run `verify/verify-hashchain.py` or `verify/verify-hashchain.sh` |
 | Hash inputs are deterministic | Canonical JSON (RFC 8785 / JCS) with fixed field order | See Mathematical Specification below |
 | Verification requires no decryption | Hashes are computed over the stored (encrypted) payload string | See Verification Model below |
+
+---
+
+## Known Limitations
+
+**Tail truncation is not detectable.** Tail truncation (removal of the newest records) is not detectable without an external anchor such as a signed head hash or published expected record count. These tools do not yet include such an anchor. A verifier is handed a single SQLite snapshot and can only prove that snapshot is internally consistent; it has no independent reference for how many records *should* exist. A vault whose most recent entries have been removed — but whose remaining records still form an unbroken chain — will verify as `VALID` with exit code `0`.
+
+What *is* detected: modification, insertion, reordering, and interior deletion of records all break either a stored hash or the `prev_hash` linkage and are reported as invalid. Only removal of records from the **end** of the chain escapes detection.
+
+**Future architecture (not implemented).** A later version may bind the chain to an externally anchored head commitment — for example an Ed25519-signed head hash or a published expected record count — which would close the truncation gap. This is documented as planned direction only. No such anchor is implemented in these tools today, and the claims in this repository must be read accordingly.
 
 ---
 
@@ -50,7 +60,7 @@ No decryption key, no vendor cooperation, and no proprietary product code are re
 The `payload` field in the vault stores the encrypted representation of the memory record as it was written by the product. The hash chain is constructed over this **encrypted string as stored** — not over any decrypted plaintext. This means:
 
 - A verifier with only the vault file can confirm chain integrity end-to-end.
-- A verifier without the decryption key can still detect any tampering, deletion, or reordering of records.
+- A verifier without the decryption key can still detect modification, insertion, interior deletion, or reordering of records. (Tail truncation is a documented exception — see [Known Limitations](#known-limitations).)
 - The encrypted payload content remains private; only its integrity is proven.
 
 ---
