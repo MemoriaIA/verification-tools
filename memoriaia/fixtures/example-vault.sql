@@ -7,8 +7,8 @@
 -- No real user data is present. No decryption key is required or implied.
 --
 -- To load and verify:
---   sqlite3 /tmp/example-vault.sqlite < fixtures/example-vault.sql
---   python verify/verify-hashchain.py --vault /tmp/example-vault.sqlite
+--   sqlite3 /tmp/example-vault.sqlite < memoriaia/fixtures/example-vault.sql
+--   python memoriaia/verify/verify-hashchain.py --vault /tmp/example-vault.sqlite
 --
 -- Expected result: Chain VALID — 3 records verified.
 --

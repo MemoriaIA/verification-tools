@@ -1,0 +1,15 @@
+# Disclaimer
+
+**Scope of proof.** The tools in this repository verify one narrow technical property: the internal hash-chain consistency of a supplied SQLite vault snapshot. For each record they confirm that the stored hash matches the canonical representation of the record's fields, and that each record's `prev_hash` equals the hash of the preceding record. That is the whole of what they check.
+
+**What these tools do NOT prove:**
+- the truth, accuracy, completeness, or meaning of any stored or encrypted content;
+- that a vault is complete — the newest records may have been removed (see the known limitation below);
+- that a vault has not been rewritten into a different but internally consistent history;
+- that append-only triggers were installed, active, or preserved historically;
+- the correctness, safety, or fitness of any Alekore or MemoriaIA product;
+- anything about a vault other than the internal consistency of the exact file the tool was run against, at the moment it was run.
+
+**Known limitation.** Hash-chain verification detects non-recomputed edits, broken links, sequence gaps, partial rewrites, malformed stored hashes, and other inconsistencies inside the supplied snapshot. Removal of records from the end of the chain (tail truncation), or any rewrite that recomputes the remaining chain into a new internally consistent state, is not detectable without an externally anchored head commitment, which these tools do not yet include. A truncated or rewritten but internally consistent vault verifies as valid.
+
+These tools are provided under the repository's MIT License (see `LICENSE`). A verification result describes the file it was run against — nothing more.

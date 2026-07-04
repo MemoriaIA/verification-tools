@@ -4,10 +4,10 @@
 
 This repository contains:
 
-- The public vault schema for MemoriaIA (`schema/`)
-- Append-only enforcement triggers (`schema/append-only-triggers.sql`)
-- Independent hash-chain verification scripts (`verify/`)
-- Example fixture data (`fixtures/`)
+- The public vault schema for MemoriaIA (`memoriaia/schema/`)
+- Append-only enforcement triggers (`memoriaia/schema/append-only-triggers.sql`)
+- Independent hash-chain verification script (`memoriaia/verify/`) and shell compatibility wrapper (`verify/`)
+- Example fixture data (`memoriaia/fixtures/`)
 
 This repository does **not** contain the MemoriaIA product, its services, encryption implementation, or any key material. Security reports about product internals should be directed to the private product security contact.
 
