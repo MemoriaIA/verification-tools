@@ -3,8 +3,8 @@
 #
 # Exercises BOTH advertised verifiers (Python and bash) and asserts the exact
 # exit-code contract (0=valid, 1=invalid, 2=environment/usage error), not merely
-# "nonzero". Also confirms the .gitignore works, the README makes no forbidden
-# claims, DISCLAIMER.md exists AND is linked, the known limitation (tail
+# "nonzero". Also confirms the .gitignore works, the public proof-surface files
+# make no forbidden claims, DISCLAIMER.md exists AND is linked, the known limitation (tail
 # truncation -> valid) holds, and no vault data / keys leak into tracked files.
 #
 # Usage:  bash tests/run-gates.sh
@@ -193,10 +193,28 @@ assert_exit "G-13b bash resolves python3-only PATH" 0 "$?"
 echo "[repo hygiene]"
 git check-ignore -v .claude/test >/dev/null 2>&1 && pass "G-14 .gitignore .claude/" || fail "G-14 .gitignore .claude/" ".claude/ not ignored"
 
-# ---- G-15: no forbidden claim phrases in public docs ---------------------
+# ---- G-15: no forbidden claim phrases in public proof surface ------------
 FORBIDDEN='certified|certification|compliant|court-admissible|legally binding|enterprise-ready|production-ready|public-ready|audit-passed|proves truth|tamper-proof|proves no deletion|proves (vault )?completeness|any alteration|detect any tampering|interior deletion|append-only proof|historical record.*detectable|CISO|NASA'
-HIT="$(grep -inE "$FORBIDDEN" README.md DISCLAIMER.md SECURITY.md 2>/dev/null || true)"
-if [ -z "$HIT" ]; then pass "G-15 no forbidden claims"; else fail "G-15 forbidden claim" "$(printf '%s' "$HIT" | tr '\n' ';')"; fi
+G15_TARGETS=(README.md DISCLAIMER.md SECURITY.md memoriaia verify)
+G15_MISSING=0
+for target in "${G15_TARGETS[@]}"; do
+  if ! git ls-files --error-unmatch "$target" >/dev/null 2>&1 && ! git ls-files "$target" | grep -q .; then
+    fail "G-15 scan target exists" "$target is missing from tracked public proof surface"
+    G15_MISSING=1
+  fi
+done
+if [ "$G15_MISSING" -eq 0 ]; then
+  G15_OUT="$WORK/g15-claims.txt"
+  git grep -nI -E "$FORBIDDEN" -- "${G15_TARGETS[@]}" >"$G15_OUT" 2>"$WORK/g15-errors.txt"
+  G15_STATUS="$?"
+  if [ "$G15_STATUS" -eq 0 ]; then
+    fail "G-15 forbidden claim" "$(tr '\n' ';' <"$G15_OUT")"
+  elif [ "$G15_STATUS" -eq 1 ]; then
+    pass "G-15 no forbidden claims"
+  else
+    fail "G-15 scan completed" "$(tr '\n' ';' <"$WORK/g15-errors.txt")"
+  fi
+fi
 
 # ---- G-16: DISCLAIMER.md exists AND is discoverable ----------------------
 if [ -f DISCLAIMER.md ]; then

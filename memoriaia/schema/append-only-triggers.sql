@@ -7,7 +7,7 @@
 --
 -- Two-layer integrity model:
 --   Layer 1 (these triggers): block UPDATE/DELETE at the database engine.
---   Layer 2 (hash chain):     detect any tampering even if triggers are removed.
+--   Layer 2 (hash chain):     detect hash-chain mismatches after trigger removal.
 --
 -- To verify triggers are installed on a vault:
 --   sqlite3 vault.sqlite "SELECT name, sql FROM sqlite_master WHERE type='trigger';"
