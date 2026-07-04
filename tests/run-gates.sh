@@ -194,7 +194,7 @@ echo "[repo hygiene]"
 git check-ignore -v .claude/test >/dev/null 2>&1 && pass "G-14 .gitignore .claude/" || fail "G-14 .gitignore .claude/" ".claude/ not ignored"
 
 # ---- G-15: no forbidden claim phrases in public proof surface ------------
-FORBIDDEN='certified|certification|compliant|court-admissible|legally binding|enterprise-ready|production-ready|public-ready|audit-passed|proves truth|tamper-proof|proves no deletion|proves (vault )?completeness|any alteration|detect any tampering|interior deletion|append-only proof|historical record.*detectable|CISO|NASA'
+FORBIDDEN='certif(y|ied|ication|ications?)|compliant|compliance|court[- ]admissible|legally binding|enterprise[- ]ready|production[- ]ready|public[- ]ready|audit[- ]passed|prove(s|d)?[[:space:]-]+(the[[:space:]-]+)?truth|tamper[[:space:]-]*proof|prove(s|d)?[[:space:]-]+no[[:space:]-]+deletion|prove(s|d)?[[:space:]-]+(full[[:space:]-]+|vault[[:space:]-]+)?completeness|any[[:space:]-]+alteration|detect(s|ed|ing)?[[:space:]-]+(any[[:space:]-]+)?tamper(ing|ed)?|interior[[:space:]-]+deletion|append[- ]only[[:space:]-]+proof|historical[[:space:]-]+record.*detectable|CISO|NASA'
 G15_TARGETS=(README.md DISCLAIMER.md SECURITY.md memoriaia verify)
 G15_MISSING=0
 for target in "${G15_TARGETS[@]}"; do
@@ -205,7 +205,7 @@ for target in "${G15_TARGETS[@]}"; do
 done
 if [ "$G15_MISSING" -eq 0 ]; then
   G15_OUT="$WORK/g15-claims.txt"
-  git grep -nI -E "$FORBIDDEN" -- "${G15_TARGETS[@]}" >"$G15_OUT" 2>"$WORK/g15-errors.txt"
+  git grep -nI -i -E "$FORBIDDEN" -- "${G15_TARGETS[@]}" >"$G15_OUT" 2>"$WORK/g15-errors.txt"
   G15_STATUS="$?"
   if [ "$G15_STATUS" -eq 0 ]; then
     fail "G-15 forbidden claim" "$(tr '\n' ';' <"$G15_OUT")"
