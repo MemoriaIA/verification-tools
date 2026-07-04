@@ -237,6 +237,15 @@ else
   [ -n "$SENSITIVE" ]  && fail "G-18 sensitive tracked file(s)"  "$(printf '%s' "$SENSITIVE"  | tr '\n' ';')"
 fi
 
+# ---- G-19: CI must invoke run-gates.sh 1:1 (anti-theater) ----------------
+echo "[ci anti-theater]"
+CI_FILE=".github/workflows/ci.yml"
+if [ -f "$CI_FILE" ] && grep -qF 'bash tests/run-gates.sh' "$CI_FILE"; then
+  pass "G-19 ci.yml invokes run-gates.sh"
+else
+  fail "G-19 ci.yml invokes run-gates.sh" "missing 'bash tests/run-gates.sh' in $CI_FILE"
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then
   echo "ALL GATES PASS"

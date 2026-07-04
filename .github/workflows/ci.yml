@@ -67,6 +67,13 @@ jobs:
         run: |
           git diff --check
 
+      - name: G-19 CI anti-theater (run-gates invocation required)
+        run: |
+          grep -qF 'bash tests/run-gates.sh' .github/workflows/ci.yml || {
+            echo "G-19 FAIL: run-gates.sh invocation missing from ci.yml"
+            exit 1
+          }
+
       - name: Run verification gate suite
         run: |
           bash tests/run-gates.sh
