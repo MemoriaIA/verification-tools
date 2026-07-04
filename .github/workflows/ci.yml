@@ -69,10 +69,22 @@ jobs:
 
       - name: G-19 CI anti-theater (run-gates invocation required)
         run: |
-          grep -qF 'bash tests/run-gates.sh' .github/workflows/ci.yml || {
-            echo "G-19 FAIL: run-gates.sh invocation missing from ci.yml"
-            exit 1
-          }
+          python - <<'PY'
+          from pathlib import Path
+
+          workflow = Path(".github/workflows/ci.yml")
+          exact_invocations = [
+              line.strip()
+              for line in workflow.read_text(encoding="utf-8").splitlines()
+              if line.strip() == "bash tests/run-gates.sh"
+          ]
+          if len(exact_invocations) != 1:
+              raise SystemExit(
+                  "G-19 FAIL: expected exactly one literal 'bash tests/run-gates.sh' command "
+                  f"in ci.yml, found {len(exact_invocations)}"
+              )
+          print("G-19 PASS: ci.yml invokes run-gates.sh exactly once")
+          PY
 
       - name: Run verification gate suite
         run: |
