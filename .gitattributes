@@ -1,0 +1,4 @@
+.gitattributes text eol=lf
+*.sh text eol=lf
+verify/*.sh text eol=lf
+tests/*.sh text eol=lf
