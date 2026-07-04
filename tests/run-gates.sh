@@ -227,7 +227,7 @@ fi
 [ ! -f memoriaia/verify/requirements.txt ] && pass "G-17 no phantom requirements.txt" || fail "G-17 phantom requirements.txt" "unexpected requirements.txt present"
 
 # ---- G-18: no leakage — allowlist + sensitive-pattern denylist (hard fail)
-ALLOWED='^(README\.md|SECURITY\.md|DISCLAIMER\.md|LICENSE|\.gitignore|\.gitattributes|memoriaia/schema/[A-Za-z0-9._-]+\.sql|memoriaia/fixtures/[A-Za-z0-9._-]+\.sql|memoriaia/verify/verify-hashchain\.py|verify/verify-hashchain\.sh|tests/run-gates\.sh)$'
+ALLOWED='^(README\.md|SECURITY\.md|DISCLAIMER\.md|LICENSE|\.gitignore|\.gitattributes|\.github/workflows/ci\.yml|memoriaia/schema/[A-Za-z0-9._-]+\.sql|memoriaia/fixtures/[A-Za-z0-9._-]+\.sql|memoriaia/verify/verify-hashchain\.py|verify/verify-hashchain\.sh|tests/run-gates\.sh)$'
 UNEXPECTED="$(git ls-files | grep -vE "$ALLOWED" || true)"
 SENSITIVE="$(git ls-files | grep -iE '\.(sqlite|sqlite3|db|pem|key|env|p12|pfx|crt)$|(^|/)id_(rsa|ed25519)' || true)"
 if [ -z "$UNEXPECTED" ] && [ -z "$SENSITIVE" ]; then
@@ -235,6 +235,28 @@ if [ -z "$UNEXPECTED" ] && [ -z "$SENSITIVE" ]; then
 else
   [ -n "$UNEXPECTED" ] && fail "G-18 unexpected tracked file(s)" "$(printf '%s' "$UNEXPECTED" | tr '\n' ';')"
   [ -n "$SENSITIVE" ]  && fail "G-18 sensitive tracked file(s)"  "$(printf '%s' "$SENSITIVE"  | tr '\n' ';')"
+fi
+
+# ---- G-19: CI must invoke run-gates.sh 1:1 (anti-theater) ----------------
+echo "[ci anti-theater]"
+CI_FILE=".github/workflows/ci.yml"
+G19_MATCHES="$(
+  git show "HEAD:$CI_FILE" 2>/dev/null | awk '
+    {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      if (line == "bash tests/run-gates.sh") {
+        count++
+      }
+    }
+    END { print count + 0 }
+  '
+)"
+if [ "$G19_MATCHES" -eq 1 ]; then
+  pass "G-19 ci.yml invokes run-gates.sh exactly once"
+else
+  fail "G-19 ci.yml invokes run-gates.sh exactly once" "expected 1 exact invocation in HEAD blob, found ${G19_MATCHES:-0}"
 fi
 
 echo
