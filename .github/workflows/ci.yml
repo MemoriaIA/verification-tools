@@ -69,10 +69,11 @@ jobs:
 
       - name: G-19 CI anti-theater (run-gates invocation required)
         run: |
-          grep -qF 'bash tests/run-gates.sh' .github/workflows/ci.yml || {
-            echo "G-19 FAIL: run-gates.sh invocation missing from ci.yml"
+          MATCHES="$(git show HEAD:.github/workflows/ci.yml | awk '{gsub(/^[ \t]+|[ \t]+$/, ""); if ($0 == "bash tests/run-gates.sh") c++} END {print c+0}')"
+          if [ "$MATCHES" -ne 1 ]; then
+            echo "G-19 FAIL: expected exactly one literal 'bash tests/run-gates.sh' command in ci.yml, found $MATCHES"
             exit 1
-          }
+          fi
 
       - name: Run verification gate suite
         run: |
