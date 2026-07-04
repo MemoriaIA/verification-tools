@@ -1,0 +1,87 @@
+name: Verification Tools CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: gates (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install SQLite on Ubuntu
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sqlite3
+
+      - name: Install SQLite on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install sqlite -y --no-progress
+          "C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          sqlite3 --version
+
+      - name: Tool versions
+        run: |
+          python --version
+          bash --version
+          sqlite3 --version
+          git --version
+
+      - name: Syntax check shell verifiers
+        run: |
+          bash -n tests/run-gates.sh
+          bash -n verify/verify-hashchain.sh
+
+      - name: Compile Python verifier
+        run: |
+          python -m py_compile memoriaia/verify/verify-hashchain.py
+
+      - name: Whitespace guard
+        run: |
+          git diff --check
+
+      - name: G-19 CI anti-theater (run-gates invocation required)
+        run: |
+          WORKFLOW="$(git show HEAD:.github/workflows/ci.yml)"
+          MATCHES="$(printf '%s\n' "$WORKFLOW" | awk '{gsub(/^[ \t]+|[ \t]+$/, ""); if ($0 == "bash tests/run-gates.sh") c++} END {print c+0}')"
+          if [ "$MATCHES" -ne 1 ]; then
+            echo "G-19 FAIL: expected exactly one literal 'bash tests/run-gates.sh' command in ci.yml, found $MATCHES"
+            exit 1
+          fi
+          NEUTRALIZERS="$(printf '%s\n' "$WORKFLOW" | grep -nE '^[[:space:]]*continue-on-error[[:space:]]*:|(^|[[:space:]])set[[:space:]]+\+e([[:space:]]|$)|\|\|[[:space:]]*(true|:)([[:space:]]|$)|;[[:space:]]*(true|exit[[:space:]]+0)([[:space:]]|$)' || true)"
+          if [ -n "$NEUTRALIZERS" ]; then
+            echo "G-19 FAIL: workflow contains gate-neutralizing pattern(s)"
+            printf '%s\n' "$NEUTRALIZERS"
+            exit 1
+          fi
+
+      - name: Run verification gate suite
+        run: |
+          bash tests/run-gates.sh
