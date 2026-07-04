@@ -240,10 +240,23 @@ fi
 # ---- G-19: CI must invoke run-gates.sh 1:1 (anti-theater) ----------------
 echo "[ci anti-theater]"
 CI_FILE=".github/workflows/ci.yml"
-if [ -f "$CI_FILE" ] && grep -qF 'bash tests/run-gates.sh' "$CI_FILE"; then
-  pass "G-19 ci.yml invokes run-gates.sh"
+G19_MATCHES="$(
+  git show "HEAD:$CI_FILE" 2>/dev/null | awk '
+    {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      if (line == "bash tests/run-gates.sh") {
+        count++
+      }
+    }
+    END { print count + 0 }
+  '
+)"
+if [ "$G19_MATCHES" -eq 1 ]; then
+  pass "G-19 ci.yml invokes run-gates.sh exactly once"
 else
-  fail "G-19 ci.yml invokes run-gates.sh" "missing 'bash tests/run-gates.sh' in $CI_FILE"
+  fail "G-19 ci.yml invokes run-gates.sh exactly once" "expected 1 exact invocation in HEAD blob, found ${G19_MATCHES:-0}"
 fi
 
 echo
