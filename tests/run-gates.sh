@@ -240,8 +240,9 @@ fi
 # ---- G-19: CI must invoke run-gates.sh 1:1 (anti-theater) ----------------
 echo "[ci anti-theater]"
 CI_FILE=".github/workflows/ci.yml"
+G19_WORKFLOW="$(git show "HEAD:$CI_FILE" 2>/dev/null || true)"
 G19_MATCHES="$(
-  git show "HEAD:$CI_FILE" 2>/dev/null | awk '
+  printf '%s\n' "$G19_WORKFLOW" | awk '
     {
       line = $0
       sub(/^[[:space:]]+/, "", line)
@@ -257,6 +258,14 @@ if [ "$G19_MATCHES" -eq 1 ]; then
   pass "G-19 ci.yml invokes run-gates.sh exactly once"
 else
   fail "G-19 ci.yml invokes run-gates.sh exactly once" "expected 1 exact invocation in HEAD blob, found ${G19_MATCHES:-0}"
+fi
+G19_NEUTRALIZERS="$(
+  printf '%s\n' "$G19_WORKFLOW" | grep -nE '^[[:space:]]*continue-on-error[[:space:]]*:|(^|[[:space:]])set[[:space:]]+\+e([[:space:]]|$)|\|\|[[:space:]]*(true|:)([[:space:]]|$)|;[[:space:]]*(true|exit[[:space:]]+0)([[:space:]]|$)' || true
+)"
+if [ -z "$G19_NEUTRALIZERS" ]; then
+  pass "G-19 ci.yml contains no gate neutralizer"
+else
+  fail "G-19 ci.yml contains no gate neutralizer" "$(printf '%s' "$G19_NEUTRALIZERS" | tr '\n' ';')"
 fi
 
 echo
