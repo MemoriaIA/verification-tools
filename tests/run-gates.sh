@@ -231,7 +231,7 @@ fi
 [ ! -f memoriaia/verify/requirements.txt ] && pass "G-17 no phantom requirements.txt" || fail "G-17 phantom requirements.txt" "unexpected requirements.txt present"
 
 # ---- G-18: no leakage — allowlist + sensitive-pattern denylist (hard fail)
-ALLOWED='^(README\.md|SECURITY\.md|DISCLAIMER\.md|LICENSE|\.gitignore|\.gitattributes|\.github/workflows/ci\.yml|memoriaia/schema/[A-Za-z0-9._-]+\.sql|memoriaia/fixtures/[A-Za-z0-9._-]+\.sql|memoriaia/verify/verify-hashchain\.py|verify/verify-hashchain\.sh|tests/run-gates\.sh|tests/g19-v2-structural-check\.sh|tests/fixtures/g19-v2/(baseline-good|missing-proof-mutant|mutant-comment-only-sentinel|mutant-continue-on-error|mutant-folded-subshell-true-paren|mutant-forged-indirect-output-unreachable|mutant-forged-proof-output|mutant-gates-extraction-service-name-collision|mutant-gates-needs-skipped-blocker|mutant-if-false-run|mutant-job-continue-on-error|mutant-job-if-false|mutant-job-if-post-steps-expression|mutant-job-quoted-continue-on-error|mutant-job-quoted-if-false|mutant-job-yaml-alias-continue-on-error|mutant-job-yaml-alias-if-false|mutant-missing-sentinel|mutant-or-true-paren|mutant-or-true|mutant-semicolon-true|mutant-sentinel-echo-only-failure|mutant-sentinel-heredoc-inert|mutant-sentinel-exit-zero-expression|mutant-sentinel-invalid-proof-echo-branch|mutant-sentinel-trap-exit-zero|mutant-sentinel-uncalled-function|mutant-step-if-expression-run|mutant-step-quoted-continue-on-error|mutant-step-quoted-if-run|skipped-run_gates-mutant)\.yml)$'
+ALLOWED='^(README\.md|SECURITY\.md|DISCLAIMER\.md|LICENSE|\.gitignore|\.gitattributes|\.github/workflows/ci\.yml|memoriaia/schema/[A-Za-z0-9._-]+\.sql|memoriaia/fixtures/[A-Za-z0-9._-]+\.sql|memoriaia/verify/verify-hashchain\.py|verify/verify-hashchain\.sh|tests/run-gates\.sh|tests/g19-v2-structural-check\.sh|tests/fixtures/g19-v2/(baseline-good|missing-proof-mutant|mutant-comment-only-sentinel|mutant-continue-on-error|mutant-folded-subshell-true-paren|mutant-forged-indirect-output-unreachable|mutant-forged-proof-output|mutant-gates-extraction-service-name-collision|mutant-gates-needs-skipped-blocker|mutant-if-false-run|mutant-job-continue-on-error|mutant-job-if-false|mutant-job-if-post-steps-expression|mutant-job-quoted-continue-on-error|mutant-job-quoted-if-false|mutant-job-yaml-alias-continue-on-error|mutant-job-yaml-alias-if-false|mutant-missing-sentinel|mutant-or-true-paren|mutant-or-true|mutant-semicolon-true|mutant-sentinel-echo-only-failure|mutant-sentinel-heredoc-inert|mutant-sentinel-exit-zero-expression|mutant-sentinel-invalid-proof-echo-branch|mutant-sentinel-invalid-proof-nested-inert-exit|mutant-sentinel-missing-proof-nested-inert-exit|mutant-sentinel-outcome-nested-inert-exit|mutant-sentinel-trap-exit-zero|mutant-sentinel-uncalled-function|mutant-step-if-expression-run|mutant-step-quoted-continue-on-error|mutant-step-quoted-if-run|skipped-run_gates-mutant)\.yml)$'
 UNEXPECTED="$(git ls-files | grep -vE "$ALLOWED" || true)"
 SENSITIVE="$(git ls-files | grep -iE '\.(sqlite|sqlite3|db|pem|key|env|p12|pfx|crt)$|(^|/)id_(rsa|ed25519)' || true)"
 if [ -z "$UNEXPECTED" ] && [ -z "$SENSITIVE" ]; then
@@ -273,6 +273,9 @@ mutant-sentinel-echo-only-failure.yml
 mutant-sentinel-heredoc-inert.yml
 mutant-sentinel-exit-zero-expression.yml
 mutant-sentinel-invalid-proof-echo-branch.yml
+mutant-sentinel-invalid-proof-nested-inert-exit.yml
+mutant-sentinel-missing-proof-nested-inert-exit.yml
+mutant-sentinel-outcome-nested-inert-exit.yml
 mutant-sentinel-trap-exit-zero.yml
 mutant-sentinel-uncalled-function.yml
 mutant-step-if-expression-run.yml

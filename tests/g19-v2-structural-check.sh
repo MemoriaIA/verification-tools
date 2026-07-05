@@ -122,8 +122,8 @@ sentinel_branch_exits_one() {
       next
     }
     in_branch {
+      if (depth == 1 && $0 ~ /^[[:space:]]*exit[[:space:]]+1[[:space:]]*$/) found_exit = 1
       if ($0 ~ /^[[:space:]]*if[[:space:]]+/) depth++
-      if ($0 ~ /^[[:space:]]*exit[[:space:]]+1[[:space:]]*$/) found_exit = 1
       if ($0 ~ /^[[:space:]]*fi[[:space:]]*$/) {
         depth--
         if (depth == 0) {
