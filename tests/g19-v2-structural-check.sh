@@ -220,6 +220,10 @@ if step_control_key_present "$GATE_BLOCK" "continue-on-error"; then
   fail "gate execution step must not define continue-on-error"
 fi
 
+if step_control_key_present "$SENTINEL_BLOCK" "continue-on-error"; then
+  fail "sentinel step must not define continue-on-error"
+fi
+
 if control_key_present "if"; then
   fail "job-level if guard found on gates job"
 fi
