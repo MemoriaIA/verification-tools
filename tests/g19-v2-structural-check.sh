@@ -97,8 +97,15 @@ SENTINEL_BLOCK="$(extract_step "$SENTINEL_STEP_NAME")"
 GATES_JOB_BLOCK="$(extract_job)"
 GATES_JOB_CONTROLS="$(
   printf '%s\n' "$GATES_JOB_BLOCK" | awk '
-    /^[[:space:]]*steps:[[:space:]]*$/ { exit }
-    { print }
+    NR == 1 {
+      gate_indent = match($0, /[^[:space:]]/) - 1
+      control_indent = gate_indent + 2
+      next
+    }
+    {
+      current_indent = match($0, /[^[:space:]]/) - 1
+      if (current_indent == control_indent && $0 ~ /^[[:space:]]*(if|continue-on-error)[[:space:]]*:/) print
+    }
   '
 )"
 
