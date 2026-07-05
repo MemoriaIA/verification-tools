@@ -36,6 +36,7 @@ mkdir "$WORK" || { echo "SETUP FAIL: could not create $WORK"; exit 2; }
 trap 'rm -rf "$WORK"' EXIT
 OUT="$WORK/out.txt"
 FAILED=0
+G19_PROOF_MATERIAL=""
 
 echo "== verification-tools gate suite =="
 echo "python:   $PY"
@@ -44,7 +45,10 @@ echo
 
 # ---- helpers -------------------------------------------------------------
 fail() { echo "  $1: FAIL - $2"; FAILED=1; }
-pass() { echo "  $1: PASS ${2:-}"; }
+pass() {
+  echo "  $1: PASS ${2:-}"
+  G19_PROOF_MATERIAL="${G19_PROOF_MATERIAL}PASS|${1}|${2:-}"$'\n'
+}
 
 assert_exit() { # label expected actual
   if [ "$3" -eq "$2" ]; then pass "$1" "(exit $3)"; else fail "$1" "expected exit $2, got $3"; fi
@@ -227,7 +231,7 @@ fi
 [ ! -f memoriaia/verify/requirements.txt ] && pass "G-17 no phantom requirements.txt" || fail "G-17 phantom requirements.txt" "unexpected requirements.txt present"
 
 # ---- G-18: no leakage — allowlist + sensitive-pattern denylist (hard fail)
-ALLOWED='^(README\.md|SECURITY\.md|DISCLAIMER\.md|LICENSE|\.gitignore|\.gitattributes|\.github/workflows/ci\.yml|memoriaia/schema/[A-Za-z0-9._-]+\.sql|memoriaia/fixtures/[A-Za-z0-9._-]+\.sql|memoriaia/verify/verify-hashchain\.py|verify/verify-hashchain\.sh|tests/run-gates\.sh)$'
+ALLOWED='^(README\.md|SECURITY\.md|DISCLAIMER\.md|LICENSE|\.gitignore|\.gitattributes|\.github/workflows/ci\.yml|memoriaia/schema/[A-Za-z0-9._-]+\.sql|memoriaia/fixtures/[A-Za-z0-9._-]+\.sql|memoriaia/verify/verify-hashchain\.py|verify/verify-hashchain\.sh|tests/run-gates\.sh|tests/g19-v2-structural-check\.sh|tests/fixtures/g19-v2/(baseline-good|missing-proof-mutant|mutant-continue-on-error|mutant-folded-subshell-true-paren|mutant-forged-indirect-output-unreachable|mutant-forged-proof-output|mutant-if-false-run|mutant-missing-sentinel|mutant-or-true-paren|mutant-or-true|mutant-semicolon-true|skipped-run_gates-mutant)\.yml)$'
 UNEXPECTED="$(git ls-files | grep -vE "$ALLOWED" || true)"
 SENSITIVE="$(git ls-files | grep -iE '\.(sqlite|sqlite3|db|pem|key|env|p12|pfx|crt)$|(^|/)id_(rsa|ed25519)' || true)"
 if [ -z "$UNEXPECTED" ] && [ -z "$SENSITIVE" ]; then
@@ -239,38 +243,72 @@ fi
 
 # ---- G-19: CI must invoke run-gates.sh 1:1 (anti-theater) ----------------
 echo "[ci anti-theater]"
-CI_FILE=".github/workflows/ci.yml"
-G19_WORKFLOW="$(git show "HEAD:$CI_FILE" 2>/dev/null || true)"
-G19_MATCHES="$(
-  printf '%s\n' "$G19_WORKFLOW" | awk '
-    {
-      line = $0
-      sub(/^[[:space:]]+/, "", line)
-      sub(/[[:space:]]+$/, "", line)
-      if (line == "bash tests/run-gates.sh") {
-        count++
-      }
-    }
-    END { print count + 0 }
-  '
-)"
-if [ "$G19_MATCHES" -eq 1 ]; then
-  pass "G-19 ci.yml invokes run-gates.sh exactly once"
+bash tests/g19-v2-structural-check.sh .github/workflows/ci.yml || fail "G-19 v2 structural check" "ci.yml contains structural anomalies"
+if [ "$FAILED" -eq 0 ]; then pass "G-19 v2 structural check"; fi
+
+G19_FIXTURE_DIR="tests/fixtures/g19-v2"
+G19_BASELINE_FIXTURE="baseline-good.yml"
+G19_MUTANT_FIXTURES="
+missing-proof-mutant.yml
+mutant-continue-on-error.yml
+mutant-folded-subshell-true-paren.yml
+mutant-forged-indirect-output-unreachable.yml
+mutant-forged-proof-output.yml
+mutant-if-false-run.yml
+mutant-missing-sentinel.yml
+mutant-or-true-paren.yml
+mutant-or-true.yml
+mutant-semicolon-true.yml
+skipped-run_gates-mutant.yml
+"
+G19_EXPECTED_FIXTURES="$G19_BASELINE_FIXTURE $G19_MUTANT_FIXTURES"
+
+G19_FIXTURE_MISSING=0
+for fixture in $G19_EXPECTED_FIXTURES; do
+  if [ ! -f "$G19_FIXTURE_DIR/$fixture" ]; then
+    fail "G-19 v2 fixture exists" "$fixture missing"
+    G19_FIXTURE_MISSING=1
+  fi
+done
+
+if [ -d "$G19_FIXTURE_DIR" ]; then
+  for fixture_path in "$G19_FIXTURE_DIR"/*.yml; do
+    [ -e "$fixture_path" ] || continue
+    fixture_name="$(basename "$fixture_path")"
+    G19_FIXTURE_EXPECTED=0
+    for expected_fixture in $G19_EXPECTED_FIXTURES; do
+      [ "$fixture_name" = "$expected_fixture" ] && G19_FIXTURE_EXPECTED=1
+    done
+    [ "$G19_FIXTURE_EXPECTED" -eq 1 ] || fail "G-19 v2 fixture inventory" "unexpected fixture $fixture_name"
+  done
 else
-  fail "G-19 ci.yml invokes run-gates.sh exactly once" "expected 1 exact invocation in HEAD blob, found ${G19_MATCHES:-0}"
+  fail "G-19 v2 fixture directory exists" "$G19_FIXTURE_DIR missing"
+  G19_FIXTURE_MISSING=1
 fi
-G19_NEUTRALIZERS="$(
-  printf '%s\n' "$G19_WORKFLOW" | grep -nE '^[[:space:]]*continue-on-error[[:space:]]*:|(^|[[:space:]])set[[:space:]]+\+e([[:space:]]|$)|\|\|[[:space:]]*(true|:)([[:space:]]|$)|;[[:space:]]*(true|exit[[:space:]]+0)([[:space:]]|$)' || true
-)"
-if [ -z "$G19_NEUTRALIZERS" ]; then
-  pass "G-19 ci.yml contains no gate neutralizer"
-else
-  fail "G-19 ci.yml contains no gate neutralizer" "$(printf '%s' "$G19_NEUTRALIZERS" | tr '\n' ';')"
+
+if [ "$G19_FIXTURE_MISSING" -eq 0 ]; then
+  if bash tests/g19-v2-structural-check.sh "$G19_FIXTURE_DIR/$G19_BASELINE_FIXTURE" >"$OUT" 2>&1; then
+    pass "G-19 v2 baseline fixture passes"
+  else
+    fail "G-19 v2 baseline fixture passes" "$(tr '\n' ';' <"$OUT")"
+  fi
+
+  for fixture in $G19_MUTANT_FIXTURES; do
+    if bash tests/g19-v2-structural-check.sh "$G19_FIXTURE_DIR/$fixture" >"$OUT" 2>&1; then
+      fail "G-19 v2 rejects $fixture" "mutant unexpectedly passed"
+    else
+      pass "G-19 v2 rejects $fixture"
+    fi
+  done
 fi
 
 echo
 if [ "$FAILED" -eq 0 ]; then
   echo "ALL GATES PASS"
+  HEAD_SHA="$(git rev-parse HEAD 2>/dev/null || printf 'unknown')"
+  VT_G19_EXEC_PROOF="$(printf 'VT_G19_EXECUTED:%s\n%s' "$HEAD_SHA" "$G19_PROOF_MATERIAL" | sha256sum | awk '{print $1}')"
+  echo "VT_G19_EXEC_PROOF=$VT_G19_EXEC_PROOF"
+  [ -n "${GITHUB_OUTPUT:-}" ] && echo "vt_g19_exec_proof=$VT_G19_EXEC_PROOF" >> "$GITHUB_OUTPUT"
   exit 0
 else
   echo "GATE FAILURE(S) DETECTED"
