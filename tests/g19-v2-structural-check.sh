@@ -156,6 +156,12 @@ if [ -n "$NEUTRALIZERS" ]; then
   printf '%s\n' "$NEUTRALIZERS"
 fi
 
+TRAP_NEUTRALIZERS="$(printf '%s\n%s\n' "$GATE_EXEC_LINES" "$SENTINEL_EXEC_LINES" | grep -nE '(^|[[:space:]])trap([[:space:]]|$)' || true)"
+if [ -n "$TRAP_NEUTRALIZERS" ]; then
+  fail "G-19 execution path contains trap neutralizer(s)"
+  printf '%s\n' "$TRAP_NEUTRALIZERS"
+fi
+
 if ! printf '%s\n' "$SENTINEL_BLOCK" | grep -qE '^[[:space:]]*if:[[:space:]]*always\(\)[[:space:]]*$'; then
   fail "missing if: always() execution sentinel"
 fi
