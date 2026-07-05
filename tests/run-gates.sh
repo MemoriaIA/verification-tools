@@ -239,38 +239,16 @@ fi
 
 # ---- G-19: CI must invoke run-gates.sh 1:1 (anti-theater) ----------------
 echo "[ci anti-theater]"
-CI_FILE=".github/workflows/ci.yml"
-G19_WORKFLOW="$(git show "HEAD:$CI_FILE" 2>/dev/null || true)"
-G19_MATCHES="$(
-  printf '%s\n' "$G19_WORKFLOW" | awk '
-    {
-      line = $0
-      sub(/^[[:space:]]+/, "", line)
-      sub(/[[:space:]]+$/, "", line)
-      if (line == "bash tests/run-gates.sh") {
-        count++
-      }
-    }
-    END { print count + 0 }
-  '
-)"
-if [ "$G19_MATCHES" -eq 1 ]; then
-  pass "G-19 ci.yml invokes run-gates.sh exactly once"
-else
-  fail "G-19 ci.yml invokes run-gates.sh exactly once" "expected 1 exact invocation in HEAD blob, found ${G19_MATCHES:-0}"
-fi
-G19_NEUTRALIZERS="$(
-  printf '%s\n' "$G19_WORKFLOW" | grep -nE '^[[:space:]]*continue-on-error[[:space:]]*:|(^|[[:space:]])set[[:space:]]+\+e([[:space:]]|$)|\|\|[[:space:]]*(true|:)([[:space:]]|$)|;[[:space:]]*(true|exit[[:space:]]+0)([[:space:]]|$)' || true
-)"
-if [ -z "$G19_NEUTRALIZERS" ]; then
-  pass "G-19 ci.yml contains no gate neutralizer"
-else
-  fail "G-19 ci.yml contains no gate neutralizer" "$(printf '%s' "$G19_NEUTRALIZERS" | tr '\n' ';')"
-fi
+bash tests/g19-v2-structural-check.sh .github/workflows/ci.yml || fail "G-19 v2 structural check" "ci.yml contains structural anomalies"
+if [ "$FAILED" -eq 0 ]; then pass "G-19 v2 structural check"; fi
 
 echo
 if [ "$FAILED" -eq 0 ]; then
   echo "ALL GATES PASS"
+  if [ -n "${GITHUB_OUTPUT:-}" ]; then
+    VT_G19_EXEC_PROOF=$("$PY" -c 'import secrets; print(secrets.token_hex(32))')
+    echo "VT_G19_EXEC_PROOF=$VT_G19_EXEC_PROOF" >> "$GITHUB_OUTPUT"
+  fi
   exit 0
 else
   echo "GATE FAILURE(S) DETECTED"
