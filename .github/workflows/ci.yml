@@ -79,7 +79,7 @@ jobs:
             echo "G-19 FAIL: tests/run-gates.sh did not complete successfully (outcome: ${{ steps.run_gates.outcome }})"
             exit 1
           fi
-          PROOF="${{ steps.run_gates.outputs.VT_G19_EXEC_PROOF }}"
+          PROOF="${{ steps.run_gates.outputs.vt_g19_exec_proof }}"
           if [ -z "$PROOF" ]; then
             echo "G-19 FAIL: VT_G19_EXEC_PROOF is missing"
             exit 1

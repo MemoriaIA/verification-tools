@@ -1,0 +1,8 @@
+name: Verification Tools CI
+jobs:
+  gates:
+    steps:
+      - name: Run verification gate suite
+        id: run_gates
+        run: |
+          bash tests/run-gates.sh
