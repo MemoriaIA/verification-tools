@@ -231,7 +231,7 @@ fi
 [ ! -f memoriaia/verify/requirements.txt ] && pass "G-17 no phantom requirements.txt" || fail "G-17 phantom requirements.txt" "unexpected requirements.txt present"
 
 # ---- G-18: no leakage — allowlist + sensitive-pattern denylist (hard fail)
-ALLOWED='^(README\.md|SECURITY\.md|DISCLAIMER\.md|LICENSE|\.gitignore|\.gitattributes|\.github/workflows/ci\.yml|memoriaia/schema/[A-Za-z0-9._-]+\.sql|memoriaia/fixtures/[A-Za-z0-9._-]+\.sql|memoriaia/verify/verify-hashchain\.py|verify/verify-hashchain\.sh|tests/run-gates\.sh|tests/g19-v2-structural-check\.sh|tests/fixtures/g19-v2/(baseline-good|missing-proof-mutant|mutant-comment-only-sentinel|mutant-continue-on-error|mutant-folded-subshell-true-paren|mutant-forged-indirect-output-unreachable|mutant-forged-proof-output|mutant-if-false-run|mutant-job-continue-on-error|mutant-job-if-false|mutant-missing-sentinel|mutant-or-true-paren|mutant-or-true|mutant-semicolon-true|skipped-run_gates-mutant)\.yml)$'
+ALLOWED='^(README\.md|SECURITY\.md|DISCLAIMER\.md|LICENSE|\.gitignore|\.gitattributes|\.github/workflows/ci\.yml|memoriaia/schema/[A-Za-z0-9._-]+\.sql|memoriaia/fixtures/[A-Za-z0-9._-]+\.sql|memoriaia/verify/verify-hashchain\.py|verify/verify-hashchain\.sh|tests/run-gates\.sh|tests/g19-v2-structural-check\.sh|tests/fixtures/g19-v2/(baseline-good|missing-proof-mutant|mutant-comment-only-sentinel|mutant-continue-on-error|mutant-folded-subshell-true-paren|mutant-forged-indirect-output-unreachable|mutant-forged-proof-output|mutant-if-false-run|mutant-job-continue-on-error|mutant-job-if-false|mutant-missing-sentinel|mutant-or-true-paren|mutant-or-true|mutant-semicolon-true|mutant-sentinel-exit-zero-expression|skipped-run_gates-mutant)\.yml)$'
 UNEXPECTED="$(git ls-files | grep -vE "$ALLOWED" || true)"
 SENSITIVE="$(git ls-files | grep -iE '\.(sqlite|sqlite3|db|pem|key|env|p12|pfx|crt)$|(^|/)id_(rsa|ed25519)' || true)"
 if [ -z "$UNEXPECTED" ] && [ -z "$SENSITIVE" ]; then
@@ -262,6 +262,7 @@ mutant-missing-sentinel.yml
 mutant-or-true-paren.yml
 mutant-or-true.yml
 mutant-semicolon-true.yml
+mutant-sentinel-exit-zero-expression.yml
 skipped-run_gates-mutant.yml
 "
 G19_EXPECTED_FIXTURES="$G19_BASELINE_FIXTURE $G19_MUTANT_FIXTURES"

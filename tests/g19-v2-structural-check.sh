@@ -176,6 +176,16 @@ if printf '%s\n' "$SENTINEL_EXEC_LINES" | grep -qE '^[[:space:]]*(true|:|exit[[:
   fail "sentinel contains inert success command"
 fi
 
+BAD_SENTINEL_EXITS="$(
+  printf '%s\n' "$SENTINEL_EXEC_LINES" | awk '
+    /^[[:space:]]*exit([[:space:]]+.*)?$/ && $0 !~ /^[[:space:]]*exit[[:space:]]+1[[:space:]]*$/ { print }
+  '
+)"
+if [ -n "$BAD_SENTINEL_EXITS" ]; then
+  fail "sentinel failure branches must terminate with literal exit 1"
+  printf '%s\n' "$BAD_SENTINEL_EXITS"
+fi
+
 if [ "$FAILED" -eq 0 ]; then
   echo "G-19 STRUCTURAL CHECK PASS"
   exit 0
