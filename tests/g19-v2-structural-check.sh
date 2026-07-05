@@ -18,7 +18,7 @@ fail() {
 CONTENT="$(cat "$WORKFLOW")"
 
 step_count() {
-  awk -v name="$1" '
+  printf '%s\n' "$GATES_JOB_BLOCK" | awk -v name="$1" '
     /^[[:space:]]*- name:[[:space:]]*/ {
       line = $0
       sub(/^[[:space:]]*- name:[[:space:]]*/, "", line)
@@ -26,11 +26,11 @@ step_count() {
       if (line == name) count++
     }
     END { print count + 0 }
-  ' "$WORKFLOW"
+  '
 }
 
 extract_step() {
-  awk -v name="$1" '
+  printf '%s\n' "$GATES_JOB_BLOCK" | awk -v name="$1" '
     /^[[:space:]]*- name:[[:space:]]*/ {
       line = $0
       sub(/^[[:space:]]*- name:[[:space:]]*/, "", line)
@@ -43,27 +43,56 @@ extract_step() {
       }
     }
     capture { print }
-  ' "$WORKFLOW"
+  '
 }
 
 extract_job() {
   awk '
-    /^[[:space:]]*gates:[[:space:]]*$/ {
-      indent = match($0, /[^[:space:]]/) - 1
+    function line_indent(value) {
+      match(value, /[^[:space:]]/)
+      return RSTART ? RSTART - 1 : -1
+    }
+    /^[[:space:]]*jobs:[[:space:]]*$/ {
+      jobs_indent = line_indent($0)
+      in_jobs = 1
+      next
+    }
+    in_jobs {
+      if ($0 ~ /^[[:space:]]*$/) {
+        if (capture) print
+        next
+      }
+      current_indent = line_indent($0)
+      if (current_indent <= jobs_indent) exit
+      if (current_indent == jobs_indent + 2 && $0 ~ /^[[:space:]]*["\047]?gates["\047]?[[:space:]]*:/) {
+        indent = current_indent
       capture = 1
       print
       next
     }
-    capture {
-      if ($0 ~ /^[[:space:]]*$/) {
-        print
-        next
-      }
-      current_indent = match($0, /[^[:space:]]/) - 1
-      if (current_indent <= indent) exit
-      print
+      if (capture && current_indent <= indent) exit
+      if (capture) print
     }
   ' "$WORKFLOW"
+}
+
+control_key_present() {
+  printf '%s\n' "$GATES_JOB_CONTROLS" | awk -v key="$1" '
+    {
+      line = $0
+      gsub(/"/, "", line)
+      gsub(/\047/, "", line)
+      if (line ~ "^[[:space:]]*" key "[[:space:]]*:") found = 1
+    }
+    END { exit found ? 0 : 1 }
+  '
+}
+
+line_count_matching() {
+  awk -v pattern="$1" '
+    $0 ~ pattern { count++ }
+    END { print count + 0 }
+  '
 }
 
 run_exec_lines() {
@@ -86,6 +115,11 @@ run_exec_lines() {
 GATE_STEP_NAME="Run verification gate suite"
 SENTINEL_STEP_NAME="G-19 CI anti-theater (run-gates execution proof required)"
 
+GATES_JOB_BLOCK="$(extract_job)"
+if [ -z "$GATES_JOB_BLOCK" ]; then
+  fail "jobs.gates job block was not found"
+fi
+
 GATE_STEP_COUNT="$(step_count "$GATE_STEP_NAME")"
 [ "$GATE_STEP_COUNT" -eq 1 ] || fail "expected exactly one '$GATE_STEP_NAME' step, found $GATE_STEP_COUNT"
 
@@ -94,7 +128,6 @@ SENTINEL_STEP_COUNT="$(step_count "$SENTINEL_STEP_NAME")"
 
 GATE_BLOCK="$(extract_step "$GATE_STEP_NAME")"
 SENTINEL_BLOCK="$(extract_step "$SENTINEL_STEP_NAME")"
-GATES_JOB_BLOCK="$(extract_job)"
 GATES_JOB_CONTROLS="$(
   printf '%s\n' "$GATES_JOB_BLOCK" | awk '
     NR == 1 {
@@ -104,10 +137,15 @@ GATES_JOB_CONTROLS="$(
     }
     {
       current_indent = match($0, /[^[:space:]]/) - 1
-      if (current_indent == control_indent && $0 ~ /^[[:space:]]*(if|continue-on-error)[[:space:]]*:/) print
+      if (current_indent == control_indent && $0 ~ /^[[:space:]]*["\047]?(if|continue-on-error|needs)["\047]?[[:space:]]*:/) print
     }
   '
 )"
+
+GATES_JOB_HEADER="$(printf '%s\n' "$GATES_JOB_BLOCK" | sed -n '1p')"
+if printf '%s\n' "$GATES_JOB_HEADER" | grep -qE '^[[:space:]]*["'\'']?gates["'\'']?[[:space:]]*:[[:space:]]*\*'; then
+  fail "jobs.gates must not be a YAML alias"
+fi
 
 if ! printf '%s\n' "$GATE_BLOCK" | grep -qE '^[[:space:]]*id:[[:space:]]*run_gates[[:space:]]*$'; then
   fail "gate execution step is missing id: run_gates"
@@ -133,12 +171,16 @@ if [ "$GATE_EXEC_LINES" != "bash tests/run-gates.sh" ]; then
   fail "gate run block must contain exactly one executable line: bash tests/run-gates.sh"
 fi
 
-if printf '%s\n' "$GATES_JOB_CONTROLS" | grep -qE '^[[:space:]]*if[[:space:]]*:'; then
+if control_key_present "if"; then
   fail "job-level if guard found on gates job"
 fi
 
-if printf '%s\n' "$GATES_JOB_CONTROLS" | grep -qE '^[[:space:]]*continue-on-error[[:space:]]*:'; then
+if control_key_present "continue-on-error"; then
   fail "job-level continue-on-error found on gates job"
+fi
+
+if control_key_present "needs"; then
+  fail "job-level needs found on gates job"
 fi
 
 if printf '%s\n%s\n' "$GATE_BLOCK" "$SENTINEL_BLOCK" | grep -qE '^[[:space:]]*if:[[:space:]]*(false|\$\{\{[^}]*false[^}]*\}\})[[:space:]]*$'; then
@@ -151,6 +193,18 @@ fi
 
 if printf '%s\n%s\n' "$GATE_BLOCK" "$SENTINEL_BLOCK" | grep -qE '^[[:space:]]*run:[[:space:]]*>[[:space:]]*$'; then
   fail "folded scalar run: > found on G-19 execution path; gate command must not be foldable"
+fi
+
+HEREDOC_MARKERS="$(printf '%s\n%s\n' "$GATE_EXEC_LINES" "$SENTINEL_EXEC_LINES" | grep -nE '<<-?[[:space:]]*["'\''"]?[A-Za-z_][A-Za-z0-9_]*["'\''"]?' || true)"
+if [ -n "$HEREDOC_MARKERS" ]; then
+  fail "G-19 execution path contains heredoc inert text"
+  printf '%s\n' "$HEREDOC_MARKERS"
+fi
+
+FUNCTION_DEFS="$(printf '%s\n%s\n' "$GATE_EXEC_LINES" "$SENTINEL_EXEC_LINES" | grep -nE '^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\)[[:space:]]*\{|function[[:space:]]+[A-Za-z_][A-Za-z0-9_]*)' || true)"
+if [ -n "$FUNCTION_DEFS" ]; then
+  fail "G-19 execution path contains uncalled shell function text"
+  printf '%s\n' "$FUNCTION_DEFS"
 fi
 
 if printf '%s\n%s\n' "$GATE_BLOCK" "$SENTINEL_BLOCK" | grep -qF 'GITHUB_OUTPUT'; then
@@ -181,6 +235,10 @@ if ! printf '%s\n' "$SENTINEL_EXEC_LINES" | grep -qE '^[[:space:]]*PROOF="\$\{\{
   fail "sentinel does not read vt_g19_exec_proof output"
 fi
 
+if ! printf '%s\n' "$SENTINEL_EXEC_LINES" | grep -qE '^[[:space:]]*if[[:space:]]+\[[[:space:]]*-z[[:space:]]+"\$PROOF"[[:space:]]*\][;[:space:]]*then[[:space:]]*$'; then
+  fail "sentinel does not reject missing execution proof"
+fi
+
 if ! printf '%s\n' "$SENTINEL_EXEC_LINES" | grep -qE "grep[[:space:]]+-qE[[:space:]]+'\\^\\[0-9a-f\\]\\{64\\}\\$'"; then
   fail "sentinel does not validate a 64-hex execution proof"
 fi
@@ -197,6 +255,11 @@ BAD_SENTINEL_EXITS="$(
 if [ -n "$BAD_SENTINEL_EXITS" ]; then
   fail "sentinel failure branches must terminate with literal exit 1"
   printf '%s\n' "$BAD_SENTINEL_EXITS"
+fi
+
+SENTINEL_EXIT_ONE_COUNT="$(printf '%s\n' "$SENTINEL_EXEC_LINES" | line_count_matching '^[[:space:]]*exit[[:space:]]+1[[:space:]]*$')"
+if [ "$SENTINEL_EXIT_ONE_COUNT" -lt 3 ]; then
+  fail "sentinel failure branches must include literal exit 1 for outcome, missing proof, and invalid proof"
 fi
 
 if [ "$FAILED" -eq 0 ]; then

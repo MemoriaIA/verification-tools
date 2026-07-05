@@ -9,6 +9,7 @@ jobs:
       - name: G-19 CI anti-theater (run-gates execution proof required)
         if: always()
         run: |
+          cat <<'EOF'
           if [ "${{ steps.run_gates.outcome }}" != "success" ]; then
             exit 1
           fi
@@ -19,3 +20,4 @@ jobs:
           if ! printf '%s\n' "$PROOF" | grep -qE '^[0-9a-f]{64}$'; then
             exit 1
           fi
+          EOF
