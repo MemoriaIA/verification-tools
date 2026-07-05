@@ -88,10 +88,51 @@ control_key_present() {
   '
 }
 
-line_count_matching() {
-  awk -v pattern="$1" '
-    $0 ~ pattern { count++ }
-    END { print count + 0 }
+step_control_key_present() {
+  printf '%s\n' "$1" | awk -v key="$2" '
+    {
+      line = $0
+      gsub(/"/, "", line)
+      gsub(/\047/, "", line)
+      if (line ~ "^[[:space:]]*" key "[[:space:]]*:") found = 1
+    }
+    END { exit found ? 0 : 1 }
+  '
+}
+
+sentinel_branch_exits_one() {
+  printf '%s\n' "$SENTINEL_EXEC_LINES" | awk -v branch="$1" '
+    function starts_branch(line) {
+      if (branch == "outcome") {
+        return line ~ /^[[:space:]]*if[[:space:]]+/ && line ~ /steps\.run_gates\.outcome/ && line ~ /!=/ && line ~ /success/ && line ~ /then[[:space:]]*$/
+      }
+      if (branch == "missing-proof") {
+        return line ~ /^[[:space:]]*if[[:space:]]+/ && line ~ /-z/ && line ~ /\$PROOF/ && line ~ /then[[:space:]]*$/
+      }
+      if (branch == "invalid-proof") {
+        return line ~ /^[[:space:]]*if[[:space:]]+!/ && line ~ /grep[[:space:]]+-qE/ && line ~ /\^\[0-9a-f\]\{64\}\$/ && line ~ /then[[:space:]]*$/
+      }
+      return 0
+    }
+    BEGIN { rc = 1 }
+    starts_branch($0) {
+      in_branch = 1
+      depth = 1
+      found_exit = 0
+      next
+    }
+    in_branch {
+      if ($0 ~ /^[[:space:]]*if[[:space:]]+/) depth++
+      if ($0 ~ /^[[:space:]]*exit[[:space:]]+1[[:space:]]*$/) found_exit = 1
+      if ($0 ~ /^[[:space:]]*fi[[:space:]]*$/) {
+        depth--
+        if (depth == 0) {
+          rc = found_exit ? 0 : 1
+          exit
+        }
+      }
+    }
+    END { exit rc }
   '
 }
 
@@ -171,6 +212,14 @@ if [ "$GATE_EXEC_LINES" != "bash tests/run-gates.sh" ]; then
   fail "gate run block must contain exactly one executable line: bash tests/run-gates.sh"
 fi
 
+if step_control_key_present "$GATE_BLOCK" "if"; then
+  fail "gate execution step must not define an if guard"
+fi
+
+if step_control_key_present "$GATE_BLOCK" "continue-on-error"; then
+  fail "gate execution step must not define continue-on-error"
+fi
+
 if control_key_present "if"; then
   fail "job-level if guard found on gates job"
 fi
@@ -243,6 +292,18 @@ if ! printf '%s\n' "$SENTINEL_EXEC_LINES" | grep -qE "grep[[:space:]]+-qE[[:spac
   fail "sentinel does not validate a 64-hex execution proof"
 fi
 
+if ! sentinel_branch_exits_one "outcome"; then
+  fail "sentinel outcome failure branch must terminate with literal exit 1"
+fi
+
+if ! sentinel_branch_exits_one "missing-proof"; then
+  fail "sentinel missing-proof failure branch must terminate with literal exit 1"
+fi
+
+if ! sentinel_branch_exits_one "invalid-proof"; then
+  fail "sentinel invalid-proof failure branch must terminate with literal exit 1"
+fi
+
 if printf '%s\n' "$SENTINEL_EXEC_LINES" | grep -qE '^[[:space:]]*(true|:|exit[[:space:]]+0)[[:space:]]*$'; then
   fail "sentinel contains inert success command"
 fi
@@ -255,11 +316,6 @@ BAD_SENTINEL_EXITS="$(
 if [ -n "$BAD_SENTINEL_EXITS" ]; then
   fail "sentinel failure branches must terminate with literal exit 1"
   printf '%s\n' "$BAD_SENTINEL_EXITS"
-fi
-
-SENTINEL_EXIT_ONE_COUNT="$(printf '%s\n' "$SENTINEL_EXEC_LINES" | line_count_matching '^[[:space:]]*exit[[:space:]]+1[[:space:]]*$')"
-if [ "$SENTINEL_EXIT_ONE_COUNT" -lt 3 ]; then
-  fail "sentinel failure branches must include literal exit 1 for outcome, missing proof, and invalid proof"
 fi
 
 if [ "$FAILED" -eq 0 ]; then
