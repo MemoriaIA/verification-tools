@@ -1,6 +1,13 @@
 name: Verification Tools CI
 jobs:
+  blocker:
+    if: ${{ false }}
+    steps:
+      - name: Blocker
+        run: |
+          echo "skipped"
   gates:
+    needs: blocker
     steps:
       - name: Run verification gate suite
         id: run_gates

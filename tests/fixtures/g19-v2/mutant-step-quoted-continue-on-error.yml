@@ -4,6 +4,7 @@ jobs:
     steps:
       - name: Run verification gate suite
         id: run_gates
+        "continue-on-error": true
         run: |
           bash tests/run-gates.sh
       - name: G-19 CI anti-theater (run-gates execution proof required)

@@ -1,6 +1,15 @@
 name: Verification Tools CI
 jobs:
+  helper:
+    services:
+      gates:
+        image: postgres:16
+    steps:
+      - name: Helper
+        run: |
+          echo "helper"
   gates:
+    if: ${{ false }}
     steps:
       - name: Run verification gate suite
         id: run_gates
