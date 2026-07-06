@@ -312,7 +312,7 @@ def proof_mutation_lines(exec_lines):
         code = line.split("#", 1)[0].strip()
         if not code or PROOF_ASSIGNMENT_PATTERN.match(code):
             continue
-        if re.match(r'^PROOF(\+)?=', code):
+        if re.match(r'^PROOF(\+)?=', code) or re.match(r'^PROOF\[[^]]+\](\+)?=', code):
             mutations.append(line)
             continue
         if re.match(r'^(declare|local|typeset|export|readonly)\b.*(^|[\s;])PROOF(\b|=)', code):
@@ -355,7 +355,7 @@ def branch_exits_before_else_or_fi(exec_lines, start_index):
     depth = 1
     for line in exec_lines[start_index + 1:]:
         stripped = line.strip()
-        if depth == 1 and re.match(r'^else\b', stripped):
+        if depth == 1 and re.match(r'^(else|elif)\b', stripped):
             return False
         if depth == 1 and stripped == "exit 1":
             return True
