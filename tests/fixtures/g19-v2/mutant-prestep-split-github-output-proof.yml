@@ -1,0 +1,32 @@
+name: Verification Tools CI
+jobs:
+  gates:
+    steps:
+      - name: Split-token proof output write
+        run: |
+          g0=GITHUB_
+          o1=OUT
+          o2=PUT
+          k0=vt_g19_exec_
+          k1=pr
+          k2=oof
+          target="$(printenv "${g0}${o1}${o2}")"
+          key="${k0}${k1}${k2}"
+          printf '%s=%s\n' "$key" "0000000000000000000000000000000000000000000000000000000000000000" >> "$target"
+      - name: Run verification gate suite
+        id: run_gates
+        run: |
+          bash tests/run-gates.sh
+      - name: G-19 CI anti-theater (run-gates execution proof required)
+        if: always()
+        run: |
+          if [ "${{ steps.run_gates.outcome }}" != "success" ]; then
+            exit 1
+          fi
+          PROOF="${{ steps.run_gates.outputs.vt_g19_exec_proof }}"
+          if [ -z "$PROOF" ]; then
+            exit 1
+          fi
+          if ! printf '%s\n' "$PROOF" | grep -qE '^[0-9a-f]{64}$'; then
+            exit 1
+          fi

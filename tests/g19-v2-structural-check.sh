@@ -9,7 +9,17 @@ if [ -z "$WORKFLOW" ] || [ ! -f "$WORKFLOW" ]; then
   exit 1
 fi
 
-python - "$WORKFLOW" <<'PY'
+PYTHON_BIN=""
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python3)"
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python)"
+else
+  echo "G-19 FAIL: structural checker requires python3 or python on PATH"
+  exit 1
+fi
+
+"$PYTHON_BIN" - "$WORKFLOW" <<'PY'
 import re
 import sys
 
@@ -143,6 +153,14 @@ top_defaults = [
     and parsed["key"] == "defaults"
 ]
 
+top_env = [
+    index for index, line in enumerate(lines)
+    if not SCALAR_LINES[index]
+    and (parsed := parse_key(line))
+    and parsed["indent"] == 0
+    and parsed["key"] == "env"
+]
+
 if len(top_jobs) != 1:
     fail(f"expected exactly one top-level jobs: key, found {len(top_jobs)}")
     top_jobs_index = None
@@ -211,6 +229,7 @@ def parse_steps(steps_index, steps_end):
             "start": index,
             "end": None,
             "keys": {},
+            "key_indexes": {},
             "key_counts": {},
             "run_style": "",
             "run_lines": [],
@@ -225,6 +244,7 @@ def parse_steps(steps_index, steps_end):
                 if parsed and parsed["indent"] == 8:
                     key = parsed["key"]
                     step["keys"][key] = parsed["value"]
+                    step["key_indexes"].setdefault(key, []).append(cursor)
                     step["key_counts"][key] = step["key_counts"].get(key, 0) + 1
                     if key == "run":
                         step["run_style"] = scalar_style(parsed["value"])
@@ -294,6 +314,10 @@ def contains_function_definition(exec_lines):
 def contains_unsupported_sentinel_control(exec_lines):
     for line in exec_lines:
         code = line.split("#", 1)[0].strip()
+        if re.search(r'(\|\||&&)\s*\{', code):
+            return True
+        if re.match(r'^[{}]\s*$', code):
+            return True
         if re.match(r'^(while|until|for|select|case)\b', code):
             return True
         if re.match(r'^(do|done|esac)\b', code):
@@ -311,6 +335,12 @@ def proof_mutation_lines(exec_lines):
     for line in exec_lines:
         code = line.split("#", 1)[0].strip()
         if not code or PROOF_ASSIGNMENT_PATTERN.match(code):
+            continue
+        if re.search(r'\$\{PROOF(?::[-=]|=)', code):
+            mutations.append(line)
+            continue
+        if re.match(r'^(declare|local|typeset)\b', code) and re.search(r'(^|[\s;])-[-A-Za-z]*n[-A-Za-z]*(\s|$)', code):
+            mutations.append(line)
             continue
         if re.match(r'^PROOF(\+)?=', code) or re.match(r'^PROOF\[[^]]+\](\+)?=', code):
             mutations.append(line)
@@ -368,6 +398,157 @@ def branch_exits_before_else_or_fi(exec_lines, start_index):
     return False
 
 
+FORBIDDEN_ENV_KEYS = {
+    "BASH_ENV",
+    "GITHUB_ENV",
+    "GITHUB_PATH",
+    "PYTHON",
+    "PYTHONPATH",
+}
+
+
+def inspect_env_block(env_index, env_indent, context):
+    env_value = parse_key(lines[env_index])["value"]
+    if reject_inline_map_value(f"{context}.env", env_value):
+        return
+    env_end = block_end(env_index, env_indent, SCALAR_LINES)
+    reject_merge_keys(env_index, env_end, env_indent, f"{context}.env")
+    for index in range(env_index + 1, env_end):
+        if SCALAR_LINES[index]:
+            continue
+        parsed = parse_key(lines[index])
+        if not parsed or parsed["indent"] != env_indent + 2:
+            continue
+        if parsed["key"] in FORBIDDEN_ENV_KEYS:
+            fail(f"{context}.env must not define {parsed['key']}")
+
+
+def writes_execution_proof_output(run_lines):
+    code_lines = [line.split("#", 1)[0] for line in executable_lines(run_lines)]
+    joined = "\n".join(code_lines)
+    lowered = joined.lower()
+    proof_key_present = (
+        "vt_g19_exec_proof" in joined
+        or ("vt_g19" in lowered and "proof" in lowered)
+        or ("vt_g19_exec" in lowered and "printf proof" in lowered)
+    )
+    output_path_present = (
+        "GITHUB_OUTPUT" in joined
+        or ("github_" in lowered and "output" in lowered)
+        or ("printenv" in lowered and "output" in lowered)
+    )
+    output_write_present = (
+        ">>" in joined
+        or re.search(r'\btee\b.*\$', joined) is not None
+        or "out-file" in lowered
+    )
+    if proof_key_present and output_path_present and output_write_present:
+        return True
+    return False
+
+
+ALLOWED_GITHUB_PATH_PREFIX = re.compile(
+    r"""^(?P<quote>['"])C:\\ProgramData\\chocolatey\\bin(?P=quote)\s*\|\s*Out-File\b(?P<tail>.*)$""",
+    re.IGNORECASE,
+)
+
+
+def allowed_github_path_tail(tail):
+    tokens = tail.split()
+    seen = set()
+    index = 0
+    while index < len(tokens):
+        token = tokens[index].lower()
+        if token == "-append":
+            seen.add("append")
+            index += 1
+            continue
+        if token == "-filepath":
+            if index + 1 >= len(tokens) or tokens[index + 1].lower() != "$env:github_path":
+                return False
+            seen.add("filepath")
+            index += 2
+            continue
+        if token == "-encoding":
+            if index + 1 >= len(tokens) or tokens[index + 1].lower() != "utf8":
+                return False
+            seen.add("encoding")
+            index += 2
+            continue
+        return False
+    return seen == {"append", "filepath", "encoding"}
+
+
+def allowed_github_path_write(step, code):
+    match = ALLOWED_GITHUB_PATH_PREFIX.match(code)
+    return (
+        step["name"] == "Install SQLite on Windows"
+        and strip_quotes(step["keys"].get("if", "")) == "runner.os == 'Windows'"
+        and strip_quotes(step["keys"].get("shell", "")) == "pwsh"
+        and match is not None
+        and allowed_github_path_tail(match.group("tail"))
+    )
+
+
+def forbidden_environment_mutation(step):
+    code_lines = [line.split("#", 1)[0].strip() for line in executable_lines(step["run_lines"])]
+    for line in executable_lines(step["run_lines"]):
+        code = line.split("#", 1)[0].strip()
+        if "GITHUB_ENV" in code:
+            return "GITHUB_ENV"
+        if "BASH_ENV" in code:
+            return "BASH_ENV"
+        if re.search(r'(^|[\s;])(export\s+)?(BASH_ENV|PYTHON|PYTHONPATH)=', code):
+            return "shell environment"
+        if "GITHUB_PATH" in code:
+            if allowed_github_path_write(step, code):
+                continue
+            return "GITHUB_PATH"
+    joined = "\n".join(code_lines)
+    lowered = joined.lower()
+    has_env_fragment = re.search(r'(^|[^a-z0-9_])env([^a-z0-9_]|$)', lowered) is not None
+    has_path_fragment = re.search(r'(^|[^a-z0-9_])path([^a-z0-9_]|$)', lowered) is not None
+    has_env_file_fragments = (
+        ">>" in joined
+        and (
+            ("github" in lowered and has_env_fragment)
+            or ("github" in lowered and has_path_fragment)
+            or ("bash" in lowered and has_env_fragment)
+        )
+    )
+    if has_env_file_fragments and not any(allowed_github_path_write(step, code) for code in code_lines):
+        return "environment file"
+    if not any(allowed_github_path_write(step, code) for code in code_lines):
+        has_append = ">>" in joined or "out-file" in lowered
+        has_indirect_lookup = (
+            "printenv" in lowered
+            or re.search(r'\$\{!\s*[A-Za-z_][A-Za-z0-9_]*\s*\}', joined) is not None
+        )
+        if has_append and has_indirect_lookup:
+            return "computed environment file"
+    return ""
+
+
+ALLOWED_USES = {
+    "actions/checkout@v4",
+    "actions/setup-python@v5",
+}
+
+
+def inspect_uses_step(step):
+    if "uses" not in step["keys"]:
+        return
+    uses_value = strip_quotes(step["keys"]["uses"])
+    if uses_value not in ALLOWED_USES:
+        fail(f"workflow uses step is not allowlisted: {uses_value}")
+    if "run" in step["keys"]:
+        fail(f"workflow step {step['name']} must not combine uses and run")
+
+
+for env_index in top_env:
+    inspect_env_block(env_index, 0, "workflow")
+
+
 if top_jobs_index is not None:
     jobs_end = block_end(top_jobs_index, 0, SCALAR_LINES)
     gates = []
@@ -384,10 +565,15 @@ if top_jobs_index is not None:
         if gates_value.startswith("*"):
             fail("jobs.gates must not be a YAML alias")
         gates_end = block_end(gates_index, 2, SCALAR_LINES)
+        reject_merge_keys(gates_index, gates_end, 2, "jobs.gates")
         gate_controls = collect_direct_controls(gates_index, gates_end, 2)
         for _, key, _ in gate_controls:
             if key in {"if", "continue-on-error", "needs"}:
                 fail(f"job-level {key} found on gates job")
+
+        env_indexes = [index for index, key, _ in gate_controls if key == "env"]
+        for env_index in env_indexes:
+            inspect_env_block(env_index, 4, "jobs.gates")
 
         defaults_indexes = [index for index, key, _ in gate_controls if key == "defaults"]
         for defaults_index in defaults_indexes:
@@ -412,9 +598,6 @@ if top_jobs_index is not None:
                     if contains_neutralizer(value):
                         fail("jobs.gates.defaults.run.shell contains a neutralizer")
 
-        if any("GITHUB_OUTPUT" in lines[index] for index in range(gates_index, gates_end)):
-            fail("workflow must not write execution proof directly through GITHUB_OUTPUT")
-
         steps_indexes = find_direct_child(gates_index, gates_end, 2, "steps")
         if len(steps_indexes) != 1:
             fail(f"expected exactly one jobs.gates.steps block, found {len(steps_indexes)}")
@@ -422,6 +605,16 @@ if top_jobs_index is not None:
         else:
             steps_index = steps_indexes[0]
             steps = parse_steps(steps_index, block_end(steps_index, 4, SCALAR_LINES))
+
+        for step in steps:
+            inspect_uses_step(step)
+            for env_index in step["key_indexes"].get("env", []):
+                inspect_env_block(env_index, 8, f"step {step['name']}")
+            if writes_execution_proof_output(step["run_lines"]):
+                fail("workflow must not write vt_g19_exec_proof directly through GITHUB_OUTPUT")
+            env_mutation = forbidden_environment_mutation(step)
+            if env_mutation:
+                fail(f"workflow must not mutate {env_mutation} in the gates job")
 
         gate_steps = [step for step in steps if step["name"] == GATE_STEP_NAME]
         sentinel_steps = [step for step in steps if step["name"] == SENTINEL_STEP_NAME]
