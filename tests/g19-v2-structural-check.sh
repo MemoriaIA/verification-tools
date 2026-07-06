@@ -447,15 +447,46 @@ def writes_execution_proof_output(run_lines):
     return False
 
 
-ALLOWED_GITHUB_PATH_LINE = r'"C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append'
+ALLOWED_GITHUB_PATH_PREFIX = re.compile(
+    r"""^(?P<quote>['"])C:\\ProgramData\\chocolatey\\bin(?P=quote)\s*\|\s*Out-File\b(?P<tail>.*)$""",
+    re.IGNORECASE,
+)
+
+
+def allowed_github_path_tail(tail):
+    tokens = tail.split()
+    seen = set()
+    index = 0
+    while index < len(tokens):
+        token = tokens[index].lower()
+        if token == "-append":
+            seen.add("append")
+            index += 1
+            continue
+        if token == "-filepath":
+            if index + 1 >= len(tokens) or tokens[index + 1].lower() != "$env:github_path":
+                return False
+            seen.add("filepath")
+            index += 2
+            continue
+        if token == "-encoding":
+            if index + 1 >= len(tokens) or tokens[index + 1].lower() != "utf8":
+                return False
+            seen.add("encoding")
+            index += 2
+            continue
+        return False
+    return seen == {"append", "filepath", "encoding"}
 
 
 def allowed_github_path_write(step, code):
+    match = ALLOWED_GITHUB_PATH_PREFIX.match(code)
     return (
         step["name"] == "Install SQLite on Windows"
         and strip_quotes(step["keys"].get("if", "")) == "runner.os == 'Windows'"
         and strip_quotes(step["keys"].get("shell", "")) == "pwsh"
-        and code == ALLOWED_GITHUB_PATH_LINE
+        and match is not None
+        and allowed_github_path_tail(match.group("tail"))
     )
 
 

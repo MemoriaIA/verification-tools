@@ -237,6 +237,8 @@ ALLOWED="${ALLOWED/mutant-job-env-bashenv-obfuscated-output/mutant-gates-merge-k
 ALLOWED="${ALLOWED/mutant-prestep-indirect-github-output-proof-write/mutant-prestep-computed-github-output-proof-write|mutant-prestep-indirect-github-output-proof-write|mutant-prestep-obfuscated-env-poison}"
 ALLOWED="${ALLOWED/mutant-prestep-obfuscated-env-poison/mutant-prestep-obfuscated-env-poison|mutant-prestep-split-github-env-bashenv|mutant-prestep-split-github-output-proof|mutant-prestep-split-github-path}"
 ALLOWED="${ALLOWED/mutant-step-if-expression-run/mutant-step-if-expression-run|mutant-step-uses-upload-artifact}"
+ALLOWED="${ALLOWED/baseline-unrelated-github-output/baseline-unrelated-github-output|baseline-windows-github-path-single-quote}"
+ALLOWED="${ALLOWED/mutant-step-if-expression-run/mutant-step-if-expression-run|mutant-step-merge-key-continue-on-error}"
 TRACKED_FILES="$WORK/tracked-files.txt"
 if ! git ls-files >"$TRACKED_FILES"; then
   fail "G-18 tracked file scan completed" "git ls-files failed"
@@ -280,6 +282,7 @@ G19_FIXTURE_DIR="tests/fixtures/g19-v2"
 G19_BASELINE_FIXTURES="
 baseline-good.yml
 baseline-unrelated-github-output.yml
+baseline-windows-github-path-single-quote.yml
 "
 G19_MUTANT_FIXTURES="
 missing-proof-mutant.yml
@@ -352,6 +355,7 @@ mutant-sentinel-unreachable-invalid-proof-guard.yml
 mutant-sentinel-unreachable-missing-proof-guard.yml
 mutant-sentinel-while-false-inert-guard.yml
 mutant-step-if-expression-run.yml
+mutant-step-merge-key-continue-on-error.yml
 mutant-step-quoted-continue-on-error.yml
 mutant-step-quoted-if-run.yml
 mutant-step-uses-upload-artifact.yml
