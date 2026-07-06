@@ -31,15 +31,15 @@ def indent_of(line):
     return len(line) - len(stripped)
 
 
-KEY_RE = re.compile(r'^(\s*)(?:"([^"]+)"|\'([^\']+)\'|([A-Za-z0-9_-]+))\s*:\s*(.*)$')
+KEY_RE = re.compile(r'^(\s*)(?:"([^"]+)"|\'([^\']+)\'|(<<)|([A-Za-z0-9_-]+))\s*:\s*(.*)$')
 
 
 def parse_key(line):
     match = KEY_RE.match(line)
     if not match:
         return None
-    key = match.group(2) or match.group(3) or match.group(4)
-    value = match.group(5).strip()
+    key = match.group(2) or match.group(3) or match.group(4) or match.group(5)
+    value = match.group(6).strip()
     return {
         "indent": len(match.group(1)),
         "key": key,
@@ -66,6 +66,32 @@ def strip_quotes(value):
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
         return value[1:-1]
     return value
+
+
+def bare_value(value):
+    return value.split("#", 1)[0].strip()
+
+
+def reject_inline_map_value(context, value):
+    bare = bare_value(value)
+    if not bare:
+        return False
+    if bare.startswith("*"):
+        fail(f"{context} must not be a YAML alias")
+    elif bare.startswith("{") or bare.startswith("["):
+        fail(f"{context} must not use flow-style YAML")
+    else:
+        fail(f"{context} must be a block map")
+    return True
+
+
+def reject_merge_keys(start, end, parent_indent, context):
+    for index in range(start + 1, end):
+        if SCALAR_LINES[index]:
+            continue
+        parsed = parse_key(lines[index])
+        if parsed and parsed["indent"] > parent_indent and parsed["key"] == "<<":
+            fail(f"{context} must not use YAML merge keys")
 
 
 def block_end(start, parent_indent, scalar_lines):
@@ -229,13 +255,17 @@ if len(top_defaults) > 1:
 
 for defaults_index in top_defaults:
     defaults_value = parse_key(lines[defaults_index])["value"]
-    if defaults_value.startswith("*"):
-        fail("top-level defaults must not be a YAML alias")
+    if reject_inline_map_value("top-level defaults", defaults_value):
         continue
     defaults_end = block_end(defaults_index, 0, SCALAR_LINES)
+    reject_merge_keys(defaults_index, defaults_end, 0, "top-level defaults")
     run_indexes = find_direct_child(defaults_index, defaults_end, 0, "run")
     for run_index in run_indexes:
+        run_value = parse_key(lines[run_index])["value"]
+        if reject_inline_map_value("top-level defaults.run", run_value):
+            continue
         run_end = block_end(run_index, 2, SCALAR_LINES)
+        reject_merge_keys(run_index, run_end, 2, "top-level defaults.run")
         shell_indexes = find_direct_child(run_index, run_end, 2, "shell")
         for shell_index in shell_indexes:
             parsed = parse_key(lines[shell_index])
@@ -259,6 +289,41 @@ def contains_function_definition(exec_lines):
         if re.match(r'^function\s+[A-Za-z_][A-Za-z0-9_]*', line):
             return True
     return False
+
+
+def contains_unsupported_sentinel_control(exec_lines):
+    for line in exec_lines:
+        code = line.split("#", 1)[0].strip()
+        if re.match(r'^(while|until|for|select|case)\b', code):
+            return True
+        if re.match(r'^(do|done|esac)\b', code):
+            return True
+        if code == ";;":
+            return True
+    return False
+
+
+PROOF_ASSIGNMENT_PATTERN = re.compile(r'^PROOF="\$\{\{\s*steps\.run_gates\.outputs\.vt_g19_exec_proof\s*\}\}"$')
+
+
+def proof_mutation_lines(exec_lines):
+    mutations = []
+    for line in exec_lines:
+        code = line.split("#", 1)[0].strip()
+        if not code or PROOF_ASSIGNMENT_PATTERN.match(code):
+            continue
+        if re.match(r'^PROOF(\+)?=', code):
+            mutations.append(line)
+            continue
+        if re.match(r'^(declare|local|typeset|export|readonly)\b.*(^|[\s;])PROOF(\b|=)', code):
+            mutations.append(line)
+            continue
+        if re.match(r'^unset\b.*(^|[\s;])PROOF\b', code):
+            mutations.append(line)
+            continue
+        if re.search(r'\b(read|printf\s+-v|eval)\b.*\bPROOF\b', code):
+            mutations.append(line)
+    return mutations
 
 
 def shell_depths(exec_lines):
@@ -327,13 +392,17 @@ if top_jobs_index is not None:
         defaults_indexes = [index for index, key, _ in gate_controls if key == "defaults"]
         for defaults_index in defaults_indexes:
             defaults_value = parse_key(lines[defaults_index])["value"]
-            if defaults_value.startswith("*"):
-                fail("jobs.gates.defaults must not be a YAML alias")
+            if reject_inline_map_value("jobs.gates.defaults", defaults_value):
                 continue
             defaults_end = block_end(defaults_index, 4, SCALAR_LINES)
+            reject_merge_keys(defaults_index, defaults_end, 4, "jobs.gates.defaults")
             run_indexes = find_direct_child(defaults_index, defaults_end, 4, "run")
             for run_index in run_indexes:
+                run_value = parse_key(lines[run_index])["value"]
+                if reject_inline_map_value("jobs.gates.defaults.run", run_value):
+                    continue
                 run_end = block_end(run_index, 6, SCALAR_LINES)
+                reject_merge_keys(run_index, run_end, 6, "jobs.gates.defaults.run")
                 shell_indexes = find_direct_child(run_index, run_end, 6, "shell")
                 for shell_index in shell_indexes:
                     parsed = parse_key(lines[shell_index])
@@ -395,6 +464,8 @@ if top_jobs_index is not None:
                 fail("G-19 execution path contains heredoc inert text")
             if contains_function_definition(sentinel_exec):
                 fail("G-19 execution path contains uncalled shell function text")
+            if contains_unsupported_sentinel_control(sentinel_exec):
+                fail("G-19 execution path contains unsupported shell control flow")
             if any("trap" in line.split("#", 1)[0] for line in sentinel_exec):
                 fail("G-19 execution path contains trap neutralizer(s)")
             if any(contains_neutralizer(line) for line in sentinel_exec):
@@ -406,9 +477,10 @@ if top_jobs_index is not None:
                 fail("sentinel failure branches must terminate with literal exit 1")
 
             proof_assignments = [line for line in sentinel_exec if re.match(r'^PROOF=', line)]
-            proof_assignment_pattern = re.compile(r'^PROOF="\$\{\{\s*steps\.run_gates\.outputs\.vt_g19_exec_proof\s*\}\}"$')
-            if len(proof_assignments) != 1 or not proof_assignment_pattern.match(proof_assignments[0]):
+            if len(proof_assignments) != 1 or not PROOF_ASSIGNMENT_PATTERN.match(proof_assignments[0]):
                 fail("sentinel must read vt_g19_exec_proof exactly once and preserve it")
+            if proof_mutation_lines(sentinel_exec):
+                fail("sentinel must not mutate PROOF after reading vt_g19_exec_proof")
 
             outcome_pattern = re.compile(r'^if \[ "\$\{\{\s*steps\.run_gates\.outcome\s*\}\}" != "success" \]; then$')
             missing_pattern = re.compile(r'^if \[ -z "\$PROOF" \]; then$')
