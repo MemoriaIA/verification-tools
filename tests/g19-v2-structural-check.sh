@@ -9,322 +9,490 @@ if [ -z "$WORKFLOW" ] || [ ! -f "$WORKFLOW" ]; then
   exit 1
 fi
 
-FAILED=0
-fail() {
-  echo "G-19 FAIL: $1"
-  FAILED=1
-}
+python - "$WORKFLOW" <<'PY'
+import re
+import sys
 
-CONTENT="$(cat "$WORKFLOW")"
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as handle:
+    lines = handle.read().splitlines()
 
-step_count() {
-  printf '%s\n' "$GATES_JOB_BLOCK" | awk -v name="$1" '
-    /^[[:space:]]*- name:[[:space:]]*/ {
-      line = $0
-      sub(/^[[:space:]]*- name:[[:space:]]*/, "", line)
-      sub(/[[:space:]]+$/, "", line)
-      if (line == name) count++
-    }
-    END { print count + 0 }
-  '
-}
+errors = []
 
-extract_step() {
-  printf '%s\n' "$GATES_JOB_BLOCK" | awk -v name="$1" '
-    /^[[:space:]]*- name:[[:space:]]*/ {
-      line = $0
-      sub(/^[[:space:]]*- name:[[:space:]]*/, "", line)
-      sub(/[[:space:]]+$/, "", line)
-      if (capture) exit
-      if (line == name) {
-        capture = 1
-        print
-        next
-      }
-    }
-    capture { print }
-  '
-}
 
-extract_job() {
-  awk '
-    function line_indent(value) {
-      match(value, /[^[:space:]]/)
-      return RSTART ? RSTART - 1 : -1
-    }
-    /^[[:space:]]*jobs:[[:space:]]*$/ {
-      jobs_indent = line_indent($0)
-      in_jobs = 1
-      next
-    }
-    in_jobs {
-      if ($0 ~ /^[[:space:]]*$/) {
-        if (capture) print
-        next
-      }
-      current_indent = line_indent($0)
-      if (current_indent <= jobs_indent) exit
-      if (current_indent == jobs_indent + 2 && $0 ~ /^[[:space:]]*["\047]?gates["\047]?[[:space:]]*:/) {
-        indent = current_indent
-      capture = 1
-      print
-      next
-    }
-      if (capture && current_indent <= indent) exit
-      if (capture) print
-    }
-  ' "$WORKFLOW"
-}
+def fail(message):
+    errors.append(message)
 
-control_key_present() {
-  printf '%s\n' "$GATES_JOB_CONTROLS" | awk -v key="$1" '
-    {
-      line = $0
-      gsub(/"/, "", line)
-      gsub(/\047/, "", line)
-      if (line ~ "^[[:space:]]*" key "[[:space:]]*:") found = 1
-    }
-    END { exit found ? 0 : 1 }
-  '
-}
 
-step_control_key_present() {
-  printf '%s\n' "$1" | awk -v key="$2" '
-    {
-      line = $0
-      gsub(/"/, "", line)
-      gsub(/\047/, "", line)
-      if (line ~ "^[[:space:]]*" key "[[:space:]]*:") found = 1
-    }
-    END { exit found ? 0 : 1 }
-  '
-}
+def indent_of(line):
+    stripped = line.lstrip(" ")
+    if not stripped:
+        return -1
+    return len(line) - len(stripped)
 
-sentinel_branch_exits_one() {
-  printf '%s\n' "$SENTINEL_EXEC_LINES" | awk -v branch="$1" '
-    function starts_branch(line) {
-      if (branch == "outcome") {
-        return line ~ /^[[:space:]]*if[[:space:]]+/ && line ~ /steps\.run_gates\.outcome/ && line ~ /!=/ && line ~ /success/ && line ~ /then[[:space:]]*$/
-      }
-      if (branch == "missing-proof") {
-        return line ~ /^[[:space:]]*if[[:space:]]+/ && line ~ /-z/ && line ~ /\$PROOF/ && line ~ /then[[:space:]]*$/
-      }
-      if (branch == "invalid-proof") {
-        return line ~ /^[[:space:]]*if[[:space:]]+!/ && line ~ /grep[[:space:]]+-qE/ && line ~ /\^\[0-9a-f\]\{64\}\$/ && line ~ /then[[:space:]]*$/
-      }
-      return 0
+
+KEY_RE = re.compile(r'^(\s*)(?:"([^"]+)"|\'([^\']+)\'|(<<)|([A-Za-z0-9_-]+))\s*:\s*(.*)$')
+
+
+def parse_key(line):
+    match = KEY_RE.match(line)
+    if not match:
+        return None
+    key = match.group(2) or match.group(3) or match.group(4) or match.group(5)
+    value = match.group(6).strip()
+    return {
+        "indent": len(match.group(1)),
+        "key": key,
+        "value": value,
     }
-    BEGIN { rc = 1 }
-    starts_branch($0) {
-      in_branch = 1
-      depth = 1
-      found_exit = 0
-      next
-    }
-    in_branch {
-      if (depth == 1 && $0 ~ /^[[:space:]]*exit[[:space:]]+1[[:space:]]*$/) found_exit = 1
-      if ($0 ~ /^[[:space:]]*if[[:space:]]+/) depth++
-      if ($0 ~ /^[[:space:]]*fi[[:space:]]*$/) {
-        depth--
-        if (depth == 0) {
-          rc = found_exit ? 0 : 1
-          exit
+
+
+def scalar_value(value):
+    bare = value.split("#", 1)[0].strip()
+    return bare in {"|", ">", "|-", ">-", "|+", ">+"}
+
+
+def scalar_style(value):
+    bare = value.split("#", 1)[0].strip()
+    if bare.startswith("|"):
+        return "|"
+    if bare.startswith(">"):
+        return ">"
+    return ""
+
+
+def strip_quotes(value):
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def bare_value(value):
+    return value.split("#", 1)[0].strip()
+
+
+def reject_inline_map_value(context, value):
+    bare = bare_value(value)
+    if not bare:
+        return False
+    if bare.startswith("*"):
+        fail(f"{context} must not be a YAML alias")
+    elif bare.startswith("{") or bare.startswith("["):
+        fail(f"{context} must not use flow-style YAML")
+    else:
+        fail(f"{context} must be a block map")
+    return True
+
+
+def reject_merge_keys(start, end, parent_indent, context):
+    for index in range(start + 1, end):
+        if SCALAR_LINES[index]:
+            continue
+        parsed = parse_key(lines[index])
+        if parsed and parsed["indent"] > parent_indent and parsed["key"] == "<<":
+            fail(f"{context} must not use YAML merge keys")
+
+
+def block_end(start, parent_indent, scalar_lines):
+    index = start + 1
+    while index < len(lines):
+        if lines[index].strip() and not scalar_lines[index] and indent_of(lines[index]) <= parent_indent:
+            break
+        index += 1
+    return index
+
+
+def scalar_line_mask():
+    mask = [False] * len(lines)
+    active_indent = None
+    for index, line in enumerate(lines):
+        if active_indent is not None:
+            if not line.strip() or indent_of(line) > active_indent:
+                mask[index] = True
+                continue
+            active_indent = None
+        parsed = parse_key(line)
+        if parsed and scalar_value(parsed["value"]):
+            active_indent = parsed["indent"]
+    return mask
+
+
+SCALAR_LINES = scalar_line_mask()
+
+
+def line_has_jobs_text(line):
+    if not line.strip() or line.lstrip().startswith("#"):
+        return False
+    return re.search(r'(^|[^A-Za-z0-9_-])jobs\s*:', line) is not None
+
+
+top_jobs = [
+    index for index, line in enumerate(lines)
+    if not SCALAR_LINES[index]
+    and (parsed := parse_key(line))
+    and parsed["indent"] == 0
+    and parsed["key"] == "jobs"
+]
+
+top_defaults = [
+    index for index, line in enumerate(lines)
+    if not SCALAR_LINES[index]
+    and (parsed := parse_key(line))
+    and parsed["indent"] == 0
+    and parsed["key"] == "defaults"
+]
+
+if len(top_jobs) != 1:
+    fail(f"expected exactly one top-level jobs: key, found {len(top_jobs)}")
+    top_jobs_index = None
+else:
+    top_jobs_index = top_jobs[0]
+    for index, line in enumerate(lines[:top_jobs_index]):
+        if line_has_jobs_text(line):
+            fail("jobs: text appears before the real top-level workflow jobs map")
+            break
+
+
+GATE_STEP_NAME = "Run verification gate suite"
+SENTINEL_STEP_NAME = "G-19 CI anti-theater (run-gates execution proof required)"
+
+
+def find_direct_child(start, end, parent_indent, key_name):
+    found = []
+    for index in range(start + 1, end):
+        if SCALAR_LINES[index]:
+            continue
+        parsed = parse_key(lines[index])
+        if parsed and parsed["indent"] == parent_indent + 2 and parsed["key"] == key_name:
+            found.append(index)
+    return found
+
+
+def collect_direct_controls(start, end, parent_indent):
+    controls = []
+    for index in range(start + 1, end):
+        if SCALAR_LINES[index]:
+            continue
+        parsed = parse_key(lines[index])
+        if parsed and parsed["indent"] == parent_indent + 2:
+            controls.append((index, parsed["key"], parsed["value"]))
+    return controls
+
+
+def collect_run_lines(run_index, run_indent):
+    collected = []
+    index = run_index + 1
+    while index < len(lines):
+        if lines[index].strip() and not SCALAR_LINES[index] and indent_of(lines[index]) <= run_indent:
+            break
+        if SCALAR_LINES[index]:
+            text = lines[index]
+            cut = min(len(text), run_indent + 2)
+            collected.append(text[cut:] if len(text) >= cut else "")
+        index += 1
+    return collected
+
+
+def parse_steps(steps_index, steps_end):
+    steps = []
+    index = steps_index + 1
+    while index < steps_end:
+        if SCALAR_LINES[index]:
+            index += 1
+            continue
+        match = re.match(r'^(\s*)-\s+name:\s*(.*?)\s*$', lines[index])
+        if not match or len(match.group(1)) != 6:
+            index += 1
+            continue
+        name = strip_quotes(match.group(2))
+        step = {
+            "name": name,
+            "start": index,
+            "end": None,
+            "keys": {},
+            "key_counts": {},
+            "run_style": "",
+            "run_lines": [],
         }
-      }
-    }
-    END { exit rc }
-  '
-}
+        cursor = index + 1
+        while cursor < steps_end:
+            if lines[cursor].strip() and not SCALAR_LINES[cursor]:
+                current_indent = indent_of(lines[cursor])
+                if current_indent <= 6:
+                    break
+                parsed = parse_key(lines[cursor])
+                if parsed and parsed["indent"] == 8:
+                    key = parsed["key"]
+                    step["keys"][key] = parsed["value"]
+                    step["key_counts"][key] = step["key_counts"].get(key, 0) + 1
+                    if key == "run":
+                        step["run_style"] = scalar_style(parsed["value"])
+                        step["run_lines"] = collect_run_lines(cursor, parsed["indent"])
+            cursor += 1
+        step["end"] = cursor
+        steps.append(step)
+        index = cursor
+    return steps
 
-run_exec_lines() {
-  awk '
-    /^[[:space:]]*run:[[:space:]]*\|[[:space:]]*$/ {
-      in_run = 1
-      next
-    }
-    in_run {
-      line = $0
-      sub(/^[[:space:]]+/, "", line)
-      sub(/[[:space:]]+$/, "", line)
-      if (line == "") next
-      if (line ~ /^#/) next
-      print line
-    }
-  '
-}
 
-GATE_STEP_NAME="Run verification gate suite"
-SENTINEL_STEP_NAME="G-19 CI anti-theater (run-gates execution proof required)"
+def executable_lines(run_lines):
+    result = []
+    for line in run_lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        result.append(stripped)
+    return result
 
-GATES_JOB_BLOCK="$(extract_job)"
-if [ -z "$GATES_JOB_BLOCK" ]; then
-  fail "jobs.gates job block was not found"
-fi
 
-GATE_STEP_COUNT="$(step_count "$GATE_STEP_NAME")"
-[ "$GATE_STEP_COUNT" -eq 1 ] || fail "expected exactly one '$GATE_STEP_NAME' step, found $GATE_STEP_COUNT"
+def contains_neutralizer(text):
+    return re.search(r'(^|\s)set\s+\+e(\s|$)|\|\|\s*(true|:)(\s|\)|;|$)|;\s*(true|exit\s+0)(\s|\)|;|$)', text) is not None
 
-SENTINEL_STEP_COUNT="$(step_count "$SENTINEL_STEP_NAME")"
-[ "$SENTINEL_STEP_COUNT" -eq 1 ] || fail "expected exactly one '$SENTINEL_STEP_NAME' step, found $SENTINEL_STEP_COUNT"
 
-GATE_BLOCK="$(extract_step "$GATE_STEP_NAME")"
-SENTINEL_BLOCK="$(extract_step "$SENTINEL_STEP_NAME")"
-GATES_JOB_CONTROLS="$(
-  printf '%s\n' "$GATES_JOB_BLOCK" | awk '
-    NR == 1 {
-      gate_indent = match($0, /[^[:space:]]/) - 1
-      control_indent = gate_indent + 2
-      next
-    }
-    {
-      current_indent = match($0, /[^[:space:]]/) - 1
-      if (current_indent == control_indent && $0 ~ /^[[:space:]]*["\047]?(if|continue-on-error|needs)["\047]?[[:space:]]*:/) print
-    }
-  '
-)"
+if len(top_defaults) > 1:
+    fail(f"expected at most one top-level defaults: key, found {len(top_defaults)}")
 
-GATES_JOB_HEADER="$(printf '%s\n' "$GATES_JOB_BLOCK" | sed -n '1p')"
-if printf '%s\n' "$GATES_JOB_HEADER" | grep -qE '^[[:space:]]*["'\'']?gates["'\'']?[[:space:]]*:[[:space:]]*\*'; then
-  fail "jobs.gates must not be a YAML alias"
-fi
+for defaults_index in top_defaults:
+    defaults_value = parse_key(lines[defaults_index])["value"]
+    if reject_inline_map_value("top-level defaults", defaults_value):
+        continue
+    defaults_end = block_end(defaults_index, 0, SCALAR_LINES)
+    reject_merge_keys(defaults_index, defaults_end, 0, "top-level defaults")
+    run_indexes = find_direct_child(defaults_index, defaults_end, 0, "run")
+    for run_index in run_indexes:
+        run_value = parse_key(lines[run_index])["value"]
+        if reject_inline_map_value("top-level defaults.run", run_value):
+            continue
+        run_end = block_end(run_index, 2, SCALAR_LINES)
+        reject_merge_keys(run_index, run_end, 2, "top-level defaults.run")
+        shell_indexes = find_direct_child(run_index, run_end, 2, "shell")
+        for shell_index in shell_indexes:
+            parsed = parse_key(lines[shell_index])
+            value = strip_quotes(parsed["value"])
+            if value != "bash":
+                fail("top-level defaults.run.shell must be exactly bash")
+            if contains_neutralizer(value):
+                fail("top-level defaults.run.shell contains a neutralizer")
 
-if ! printf '%s\n' "$GATE_BLOCK" | grep -qE '^[[:space:]]*id:[[:space:]]*run_gates[[:space:]]*$'; then
-  fail "gate execution step is missing id: run_gates"
-fi
 
-GATE_EXEC_LINES="$(printf '%s\n' "$GATE_BLOCK" | run_exec_lines)"
-SENTINEL_EXEC_LINES="$(printf '%s\n' "$SENTINEL_BLOCK" | run_exec_lines)"
+def contains_function_definition(exec_lines):
+    for index, line in enumerate(exec_lines):
+        if re.match(r'^(function\s+)?[A-Za-z_][A-Za-z0-9_]*\s*\(\)\s*\{', line):
+            return True
+        if re.match(r'^[A-Za-z_][A-Za-z0-9_]*\s*\(\)\s*$', line):
+            cursor = index + 1
+            while cursor < len(exec_lines) and not exec_lines[cursor].strip():
+                cursor += 1
+            if cursor < len(exec_lines) and re.match(r'^\{\s*$', exec_lines[cursor]):
+                return True
+        if re.match(r'^function\s+[A-Za-z_][A-Za-z0-9_]*', line):
+            return True
+    return False
 
-RUN_GATES_CALLS="$(
-  printf '%s\n' "$GATE_EXEC_LINES" | awk '
-    {
-      line = $0
-      sub(/^[[:space:]]+/, "", line)
-      sub(/[[:space:]]+$/, "", line)
-      if (line == "bash tests/run-gates.sh") count++
-    }
-    END { print count + 0 }
-  '
-)"
-[ "$RUN_GATES_CALLS" -eq 1 ] || fail "expected exactly one literal bash tests/run-gates.sh command in gate step, found $RUN_GATES_CALLS"
 
-if [ "$GATE_EXEC_LINES" != "bash tests/run-gates.sh" ]; then
-  fail "gate run block must contain exactly one executable line: bash tests/run-gates.sh"
-fi
+def contains_unsupported_sentinel_control(exec_lines):
+    for line in exec_lines:
+        code = line.split("#", 1)[0].strip()
+        if re.match(r'^(while|until|for|select|case)\b', code):
+            return True
+        if re.match(r'^(do|done|esac)\b', code):
+            return True
+        if code == ";;":
+            return True
+    return False
 
-if step_control_key_present "$GATE_BLOCK" "if"; then
-  fail "gate execution step must not define an if guard"
-fi
 
-if step_control_key_present "$GATE_BLOCK" "continue-on-error"; then
-  fail "gate execution step must not define continue-on-error"
-fi
+PROOF_ASSIGNMENT_PATTERN = re.compile(r'^PROOF="\$\{\{\s*steps\.run_gates\.outputs\.vt_g19_exec_proof\s*\}\}"$')
 
-if step_control_key_present "$SENTINEL_BLOCK" "continue-on-error"; then
-  fail "sentinel step must not define continue-on-error"
-fi
 
-if control_key_present "if"; then
-  fail "job-level if guard found on gates job"
-fi
+def proof_mutation_lines(exec_lines):
+    mutations = []
+    for line in exec_lines:
+        code = line.split("#", 1)[0].strip()
+        if not code or PROOF_ASSIGNMENT_PATTERN.match(code):
+            continue
+        if re.match(r'^PROOF(\+)?=', code) or re.match(r'^PROOF\[[^]]+\](\+)?=', code):
+            mutations.append(line)
+            continue
+        if re.match(r'^(declare|local|typeset|export|readonly)\b.*(^|[\s;])PROOF(\b|=)', code):
+            mutations.append(line)
+            continue
+        if re.match(r'^unset\b.*(^|[\s;])PROOF\b', code):
+            mutations.append(line)
+            continue
+        if re.search(r'\b(read|printf\s+-v|eval)\b.*\bPROOF\b', code):
+            mutations.append(line)
+    return mutations
 
-if control_key_present "continue-on-error"; then
-  fail "job-level continue-on-error found on gates job"
-fi
 
-if control_key_present "needs"; then
-  fail "job-level needs found on gates job"
-fi
+def shell_depths(exec_lines):
+    depths = []
+    depth = 0
+    for line in exec_lines:
+        stripped = line.strip()
+        depths.append(depth)
+        if re.match(r'^if\b.*\bthen\s*$', stripped):
+            depth += 1
+        elif re.match(r'^fi\s*$', stripped):
+            depth = max(0, depth - 1)
+    return depths
 
-if printf '%s\n%s\n' "$GATE_BLOCK" "$SENTINEL_BLOCK" | grep -qE '^[[:space:]]*if:[[:space:]]*(false|\$\{\{[^}]*false[^}]*\}\})[[:space:]]*$'; then
-  fail "if:false guard found on G-19 execution path"
-fi
 
-if printf '%s\n%s\n' "$GATE_BLOCK" "$SENTINEL_BLOCK" | grep -qE '^[[:space:]]*continue-on-error[[:space:]]*:'; then
-  fail "continue-on-error found on G-19 execution path"
-fi
+def require_top_level_branch(exec_lines, pattern, label):
+    depths = shell_depths(exec_lines)
+    for index, line in enumerate(exec_lines):
+        if depths[index] == 0 and pattern.match(line):
+            if branch_exits_before_else_or_fi(exec_lines, index):
+                return True
+            fail(f"{label} failure branch must terminate with literal exit 1 before else or fi")
+            return False
+    fail(f"sentinel does not assert {label}")
+    return False
 
-if printf '%s\n%s\n' "$GATE_BLOCK" "$SENTINEL_BLOCK" | grep -qE '^[[:space:]]*run:[[:space:]]*>[[:space:]]*$'; then
-  fail "folded scalar run: > found on G-19 execution path; gate command must not be foldable"
-fi
 
-HEREDOC_MARKERS="$(printf '%s\n%s\n' "$GATE_EXEC_LINES" "$SENTINEL_EXEC_LINES" | grep -nE '<<-?[[:space:]]*["'\''"]?[A-Za-z_][A-Za-z0-9_]*["'\''"]?' || true)"
-if [ -n "$HEREDOC_MARKERS" ]; then
-  fail "G-19 execution path contains heredoc inert text"
-  printf '%s\n' "$HEREDOC_MARKERS"
-fi
+def branch_exits_before_else_or_fi(exec_lines, start_index):
+    depth = 1
+    for line in exec_lines[start_index + 1:]:
+        stripped = line.strip()
+        if depth == 1 and re.match(r'^(else|elif)\b', stripped):
+            return False
+        if depth == 1 and stripped == "exit 1":
+            return True
+        if re.match(r'^if\b.*\bthen\s*$', stripped):
+            depth += 1
+        elif re.match(r'^fi\s*$', stripped):
+            depth -= 1
+            if depth == 0:
+                return False
+    return False
 
-FUNCTION_DEFS="$(printf '%s\n%s\n' "$GATE_EXEC_LINES" "$SENTINEL_EXEC_LINES" | grep -nE '^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\)[[:space:]]*\{|function[[:space:]]+[A-Za-z_][A-Za-z0-9_]*)' || true)"
-if [ -n "$FUNCTION_DEFS" ]; then
-  fail "G-19 execution path contains uncalled shell function text"
-  printf '%s\n' "$FUNCTION_DEFS"
-fi
 
-if printf '%s\n%s\n' "$GATE_BLOCK" "$SENTINEL_BLOCK" | grep -qF 'GITHUB_OUTPUT'; then
-  fail "workflow must not write execution proof directly through GITHUB_OUTPUT"
-fi
+if top_jobs_index is not None:
+    jobs_end = block_end(top_jobs_index, 0, SCALAR_LINES)
+    gates = []
+    for index in range(top_jobs_index + 1, jobs_end):
+        if SCALAR_LINES[index]:
+            continue
+        parsed = parse_key(lines[index])
+        if parsed and parsed["indent"] == 2 and parsed["key"] == "gates":
+            gates.append((index, parsed["value"]))
+    if len(gates) != 1:
+        fail(f"expected exactly one top-level jobs.gates job, found {len(gates)}")
+    else:
+        gates_index, gates_value = gates[0]
+        if gates_value.startswith("*"):
+            fail("jobs.gates must not be a YAML alias")
+        gates_end = block_end(gates_index, 2, SCALAR_LINES)
+        gate_controls = collect_direct_controls(gates_index, gates_end, 2)
+        for _, key, _ in gate_controls:
+            if key in {"if", "continue-on-error", "needs"}:
+                fail(f"job-level {key} found on gates job")
 
-NEUTRALIZERS="$(printf '%s\n%s\n' "$GATE_BLOCK" "$SENTINEL_BLOCK" | grep -nE '(^|[[:space:]])set[[:space:]]+\+e([[:space:]]|$)|\|\|[[:space:]]*(true|:)([[:space:]]|\)|;|$)|;[[:space:]]*(true|exit[[:space:]]+0)([[:space:]]|\)|;|$)' || true)"
-if [ -n "$NEUTRALIZERS" ]; then
-  fail "G-19 execution path contains gate-neutralizing pattern(s)"
-  printf '%s\n' "$NEUTRALIZERS"
-fi
+        defaults_indexes = [index for index, key, _ in gate_controls if key == "defaults"]
+        for defaults_index in defaults_indexes:
+            defaults_value = parse_key(lines[defaults_index])["value"]
+            if reject_inline_map_value("jobs.gates.defaults", defaults_value):
+                continue
+            defaults_end = block_end(defaults_index, 4, SCALAR_LINES)
+            reject_merge_keys(defaults_index, defaults_end, 4, "jobs.gates.defaults")
+            run_indexes = find_direct_child(defaults_index, defaults_end, 4, "run")
+            for run_index in run_indexes:
+                run_value = parse_key(lines[run_index])["value"]
+                if reject_inline_map_value("jobs.gates.defaults.run", run_value):
+                    continue
+                run_end = block_end(run_index, 6, SCALAR_LINES)
+                reject_merge_keys(run_index, run_end, 6, "jobs.gates.defaults.run")
+                shell_indexes = find_direct_child(run_index, run_end, 6, "shell")
+                for shell_index in shell_indexes:
+                    parsed = parse_key(lines[shell_index])
+                    value = strip_quotes(parsed["value"])
+                    if value != "bash":
+                        fail("jobs.gates.defaults.run.shell must be exactly bash")
+                    if contains_neutralizer(value):
+                        fail("jobs.gates.defaults.run.shell contains a neutralizer")
 
-TRAP_NEUTRALIZERS="$(printf '%s\n%s\n' "$GATE_EXEC_LINES" "$SENTINEL_EXEC_LINES" | grep -nE '(^|[[:space:]])trap([[:space:]]|$)' || true)"
-if [ -n "$TRAP_NEUTRALIZERS" ]; then
-  fail "G-19 execution path contains trap neutralizer(s)"
-  printf '%s\n' "$TRAP_NEUTRALIZERS"
-fi
+        if any("GITHUB_OUTPUT" in lines[index] for index in range(gates_index, gates_end)):
+            fail("workflow must not write execution proof directly through GITHUB_OUTPUT")
 
-if ! printf '%s\n' "$SENTINEL_BLOCK" | grep -qE '^[[:space:]]*if:[[:space:]]*always\(\)[[:space:]]*$'; then
-  fail "missing if: always() execution sentinel"
-fi
+        steps_indexes = find_direct_child(gates_index, gates_end, 2, "steps")
+        if len(steps_indexes) != 1:
+            fail(f"expected exactly one jobs.gates.steps block, found {len(steps_indexes)}")
+            steps = []
+        else:
+            steps_index = steps_indexes[0]
+            steps = parse_steps(steps_index, block_end(steps_index, 4, SCALAR_LINES))
 
-if ! printf '%s\n' "$SENTINEL_EXEC_LINES" | grep -qE '^[[:space:]]*if[[:space:]]+\[[[:space:]]*"\$\{\{[[:space:]]*steps\.run_gates\.outcome[[:space:]]*\}\}"[[:space:]]*!=[[:space:]]*"success"[[:space:]]*\][;[:space:]]*then[[:space:]]*$'; then
-  fail "sentinel does not assert steps.run_gates.outcome"
-fi
+        gate_steps = [step for step in steps if step["name"] == GATE_STEP_NAME]
+        sentinel_steps = [step for step in steps if step["name"] == SENTINEL_STEP_NAME]
+        if len(gate_steps) != 1:
+            fail(f"expected exactly one '{GATE_STEP_NAME}' step, found {len(gate_steps)}")
+        if len(sentinel_steps) != 1:
+            fail(f"expected exactly one '{SENTINEL_STEP_NAME}' step, found {len(sentinel_steps)}")
 
-if ! printf '%s\n' "$SENTINEL_EXEC_LINES" | grep -qE '^[[:space:]]*PROOF="\$\{\{[[:space:]]*steps\.run_gates\.outputs\.vt_g19_exec_proof[[:space:]]*\}\}"[[:space:]]*$'; then
-  fail "sentinel does not read vt_g19_exec_proof output"
-fi
+        if len(gate_steps) == 1:
+            gate = gate_steps[0]
+            gate_exec = executable_lines(gate["run_lines"])
+            if gate["keys"].get("id", "").strip() != "run_gates":
+                fail("gate execution step is missing id: run_gates")
+            if "if" in gate["keys"]:
+                fail("gate execution step must not define an if guard")
+            if "continue-on-error" in gate["keys"]:
+                fail("gate execution step must not define continue-on-error")
+            if "shell" in gate["keys"] and strip_quotes(gate["keys"]["shell"]) != "bash":
+                fail("gate execution step shell must be exactly bash when present")
+            if gate["run_style"] == ">":
+                fail("folded scalar run: > found on gate execution step")
+            if gate_exec != ["bash tests/run-gates.sh"]:
+                fail("gate run block must contain exactly one executable line: bash tests/run-gates.sh")
+            if any(contains_neutralizer(line) for line in gate_exec):
+                fail("gate execution step contains gate-neutralizing pattern(s)")
 
-if ! printf '%s\n' "$SENTINEL_EXEC_LINES" | grep -qE '^[[:space:]]*if[[:space:]]+\[[[:space:]]*-z[[:space:]]+"\$PROOF"[[:space:]]*\][;[:space:]]*then[[:space:]]*$'; then
-  fail "sentinel does not reject missing execution proof"
-fi
+        if len(sentinel_steps) == 1:
+            sentinel = sentinel_steps[0]
+            sentinel_exec = executable_lines(sentinel["run_lines"])
+            sentinel_if = sentinel["keys"].get("if")
+            if sentinel_if is None or sentinel_if.strip() != "always()":
+                fail("sentinel step must define exactly if: always()")
+            if "continue-on-error" in sentinel["keys"]:
+                fail("sentinel step must not define continue-on-error")
+            if "shell" in sentinel["keys"] and strip_quotes(sentinel["keys"]["shell"]) != "bash":
+                fail("sentinel step shell must be exactly bash when present")
+            if sentinel["run_style"] == ">":
+                fail("folded scalar run: > found on sentinel step")
+            if any("<<" in line for line in sentinel_exec):
+                fail("G-19 execution path contains heredoc inert text")
+            if contains_function_definition(sentinel_exec):
+                fail("G-19 execution path contains uncalled shell function text")
+            if contains_unsupported_sentinel_control(sentinel_exec):
+                fail("G-19 execution path contains unsupported shell control flow")
+            if any("trap" in line.split("#", 1)[0] for line in sentinel_exec):
+                fail("G-19 execution path contains trap neutralizer(s)")
+            if any(contains_neutralizer(line) for line in sentinel_exec):
+                fail("G-19 execution path contains gate-neutralizing pattern(s)")
+            if any(line in {"true", ":", "exit 0"} for line in sentinel_exec):
+                fail("sentinel contains inert success command")
+            bad_exits = [line for line in sentinel_exec if re.match(r'^exit\b', line) and line != "exit 1"]
+            if bad_exits:
+                fail("sentinel failure branches must terminate with literal exit 1")
 
-if ! printf '%s\n' "$SENTINEL_EXEC_LINES" | grep -qE "grep[[:space:]]+-qE[[:space:]]+'\\^\\[0-9a-f\\]\\{64\\}\\$'"; then
-  fail "sentinel does not validate a 64-hex execution proof"
-fi
+            proof_assignments = [line for line in sentinel_exec if re.match(r'^PROOF=', line)]
+            if len(proof_assignments) != 1 or not PROOF_ASSIGNMENT_PATTERN.match(proof_assignments[0]):
+                fail("sentinel must read vt_g19_exec_proof exactly once and preserve it")
+            if proof_mutation_lines(sentinel_exec):
+                fail("sentinel must not mutate PROOF after reading vt_g19_exec_proof")
 
-if ! sentinel_branch_exits_one "outcome"; then
-  fail "sentinel outcome failure branch must terminate with literal exit 1"
-fi
+            outcome_pattern = re.compile(r'^if \[ "\$\{\{\s*steps\.run_gates\.outcome\s*\}\}" != "success" \]; then$')
+            missing_pattern = re.compile(r'^if \[ -z "\$PROOF" \]; then$')
+            invalid_pattern = re.compile(r"^if ! printf '%s\\n' \"\$PROOF\" \| grep -qE '\^\[0-9a-f\]\{64\}\$'; then$")
+            require_top_level_branch(sentinel_exec, outcome_pattern, "steps.run_gates.outcome")
+            require_top_level_branch(sentinel_exec, missing_pattern, "missing execution proof")
+            require_top_level_branch(sentinel_exec, invalid_pattern, "invalid execution proof")
 
-if ! sentinel_branch_exits_one "missing-proof"; then
-  fail "sentinel missing-proof failure branch must terminate with literal exit 1"
-fi
+if errors:
+    for error in errors:
+        print(f"G-19 FAIL: {error}")
+    sys.exit(1)
 
-if ! sentinel_branch_exits_one "invalid-proof"; then
-  fail "sentinel invalid-proof failure branch must terminate with literal exit 1"
-fi
-
-if printf '%s\n' "$SENTINEL_EXEC_LINES" | grep -qE '^[[:space:]]*(true|:|exit[[:space:]]+0)[[:space:]]*$'; then
-  fail "sentinel contains inert success command"
-fi
-
-BAD_SENTINEL_EXITS="$(
-  printf '%s\n' "$SENTINEL_EXEC_LINES" | awk '
-    /^[[:space:]]*exit([[:space:]]+.*)?$/ && $0 !~ /^[[:space:]]*exit[[:space:]]+1[[:space:]]*$/ { print }
-  '
-)"
-if [ -n "$BAD_SENTINEL_EXITS" ]; then
-  fail "sentinel failure branches must terminate with literal exit 1"
-  printf '%s\n' "$BAD_SENTINEL_EXITS"
-fi
-
-if [ "$FAILED" -eq 0 ]; then
-  echo "G-19 STRUCTURAL CHECK PASS"
-  exit 0
-fi
-
-exit 1
+print("G-19 STRUCTURAL CHECK PASS")
+PY
