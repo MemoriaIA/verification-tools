@@ -42,13 +42,43 @@ def indent_of(line):
 
 
 KEY_RE = re.compile(r'^(\s*)(?:"([^"]+)"|\'([^\']+)\'|(<<)|([A-Za-z0-9_-]+))\s*:\s*(.*)$')
+STEP_ITEM_RE = re.compile(r'^(\s*)-\s*(?:(?:"([^"]+)"|\'([^\']+)\'|([A-Za-z0-9_-]+))\s*:\s*(.*))?\s*$')
+
+
+def decode_double_quoted_key(value):
+    def replace_unicode(match):
+        return chr(int(match.group(1), 16))
+
+    value = re.sub(r'\\u([0-9A-Fa-f]{4})', replace_unicode, value)
+    value = re.sub(r'\\U([0-9A-Fa-f]{8})', replace_unicode, value)
+    replacements = {
+        r'\"': '"',
+        r'\\': '\\',
+        r'\/': '/',
+        r'\b': '\b',
+        r'\f': '\f',
+        r'\n': '\n',
+        r'\r': '\r',
+        r'\t': '\t',
+    }
+    for escaped, replacement in replacements.items():
+        value = value.replace(escaped, replacement)
+    return value
+
+
+def normalize_key(double_quoted, single_quoted, bare):
+    if double_quoted is not None:
+        return decode_double_quoted_key(double_quoted)
+    if single_quoted is not None:
+        return single_quoted.replace("''", "'")
+    return bare
 
 
 def parse_key(line):
     match = KEY_RE.match(line)
     if not match:
         return None
-    key = match.group(2) or match.group(3) or match.group(4) or match.group(5)
+    key = match.group(4) or normalize_key(match.group(2), match.group(3), match.group(5))
     value = match.group(6).strip()
     return {
         "indent": len(match.group(1)),
@@ -125,6 +155,10 @@ def scalar_line_mask():
         parsed = parse_key(line)
         if parsed and scalar_value(parsed["value"]):
             active_indent = parsed["indent"]
+            continue
+        item = STEP_ITEM_RE.match(line)
+        if item and scalar_value((item.group(5) or "").strip()):
+            active_indent = len(item.group(1)) + 2
     return mask
 
 
@@ -219,13 +253,12 @@ def parse_steps(steps_index, steps_end):
         if SCALAR_LINES[index]:
             index += 1
             continue
-        match = re.match(r'^(\s*)-\s+name:\s*(.*?)\s*$', lines[index])
-        if not match or len(match.group(1)) != 6:
+        item = parse_step_item(lines[index])
+        if not item or item["indent"] != 6:
             index += 1
             continue
-        name = strip_quotes(match.group(2))
         step = {
-            "name": name,
+            "name": f"anonymous step at line {index + 1}",
             "start": index,
             "end": None,
             "keys": {},
@@ -234,6 +267,8 @@ def parse_steps(steps_index, steps_end):
             "run_style": "",
             "run_lines": [],
         }
+        if item["key"]:
+            record_step_key(step, item["key"], item["value"], index, 8)
         cursor = index + 1
         while cursor < steps_end:
             if lines[cursor].strip() and not SCALAR_LINES[cursor]:
@@ -243,17 +278,36 @@ def parse_steps(steps_index, steps_end):
                 parsed = parse_key(lines[cursor])
                 if parsed and parsed["indent"] == 8:
                     key = parsed["key"]
-                    step["keys"][key] = parsed["value"]
-                    step["key_indexes"].setdefault(key, []).append(cursor)
-                    step["key_counts"][key] = step["key_counts"].get(key, 0) + 1
-                    if key == "run":
-                        step["run_style"] = scalar_style(parsed["value"])
-                        step["run_lines"] = collect_run_lines(cursor, parsed["indent"])
+                    record_step_key(step, key, parsed["value"], cursor, parsed["indent"])
             cursor += 1
         step["end"] = cursor
         steps.append(step)
         index = cursor
     return steps
+
+
+def parse_step_item(line):
+    match = STEP_ITEM_RE.match(line)
+    if not match:
+        return None
+    key = normalize_key(match.group(2), match.group(3), match.group(4)) if any(match.group(i) is not None for i in (2, 3, 4)) else ""
+    return {
+        "indent": len(match.group(1)),
+        "key": key,
+        "value": (match.group(5) or "").strip(),
+    }
+
+
+def record_step_key(step, key, value, index, effective_indent):
+    if key == "name":
+        step["name"] = strip_quotes(value)
+    else:
+        step["keys"][key] = value
+        step["key_indexes"].setdefault(key, []).append(index)
+        step["key_counts"][key] = step["key_counts"].get(key, 0) + 1
+        if key == "run":
+            step["run_style"] = scalar_style(value)
+            step["run_lines"] = collect_run_lines(index, effective_indent)
 
 
 def executable_lines(run_lines):
@@ -336,6 +390,9 @@ def proof_mutation_lines(exec_lines):
         code = line.split("#", 1)[0].strip()
         if not code or PROOF_ASSIGNMENT_PATTERN.match(code):
             continue
+        if re.search(r'(^|[;&|]\s*)((builtin|command)\s+)?(declare|local|typeset)\b[^#;&|]*(^|[\s;])-[-A-Za-z]*n[-A-Za-z]*(\s|$)', code):
+            mutations.append(line)
+            continue
         if re.search(r'\$\{PROOF(?::[-=]|=)', code):
             mutations.append(line)
             continue
@@ -402,7 +459,9 @@ FORBIDDEN_ENV_KEYS = {
     "BASH_ENV",
     "GITHUB_ENV",
     "GITHUB_PATH",
+    "PATH",
     "PYTHON",
+    "PYTHON_PATH",
     "PYTHONPATH",
 }
 
@@ -419,8 +478,9 @@ def inspect_env_block(env_index, env_indent, context):
         parsed = parse_key(lines[index])
         if not parsed or parsed["indent"] != env_indent + 2:
             continue
-        if parsed["key"] in FORBIDDEN_ENV_KEYS:
-            fail(f"{context}.env must not define {parsed['key']}")
+        env_key = parsed["key"].upper()
+        if env_key in FORBIDDEN_ENV_KEYS:
+            fail(f"{context}.env must not define {env_key}")
 
 
 def writes_execution_proof_output(run_lines):
@@ -494,11 +554,13 @@ def forbidden_environment_mutation(step):
     code_lines = [line.split("#", 1)[0].strip() for line in executable_lines(step["run_lines"])]
     for line in executable_lines(step["run_lines"]):
         code = line.split("#", 1)[0].strip()
+        if re.search(r'(^|[;&|]\s*)eval\b', code):
+            return "computed environment file"
         if "GITHUB_ENV" in code:
             return "GITHUB_ENV"
         if "BASH_ENV" in code:
             return "BASH_ENV"
-        if re.search(r'(^|[\s;])(export\s+)?(BASH_ENV|PYTHON|PYTHONPATH)=', code):
+        if re.search(r'(^|[\s;])(export\s+)?(BASH_ENV|PATH|PYTHON|PYTHONPATH)=', code):
             return "shell environment"
         if "GITHUB_PATH" in code:
             if allowed_github_path_write(step, code):
