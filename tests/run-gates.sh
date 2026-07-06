@@ -232,6 +232,7 @@ fi
 
 # ---- G-18: no leakage — allowlist + sensitive-pattern denylist (hard fail)
 ALLOWED='^(README\.md|SECURITY\.md|DISCLAIMER\.md|LICENSE|\.gitignore|\.gitattributes|\.github/workflows/ci\.yml|memoriaia/schema/[A-Za-z0-9._-]+\.sql|memoriaia/fixtures/[A-Za-z0-9._-]+\.sql|memoriaia/verify/verify-hashchain\.py|verify/verify-hashchain\.sh|tests/run-gates\.sh|tests/g19-v2-structural-check\.sh|tests/fixtures/g19-v2/(baseline-good|baseline-unrelated-github-output|missing-proof-mutant|mutant-comment-only-sentinel|mutant-continue-on-error|mutant-direct-github-output-proof-write|mutant-folded-subshell-true-paren|mutant-forged-indirect-output-unreachable|mutant-forged-proof-output|mutant-gates-extraction-service-name-collision|mutant-gate-steps-hidden-in-shell-string|mutant-gates-needs-skipped-blocker|mutant-job-default-shell-alias-or-true|mutant-job-default-shell-flow-map-or-true|mutant-job-default-shell-merge-key-or-true|mutant-job-default-shell-or-true|mutant-job-default-shell-run-alias-or-true|mutant-if-false-run|mutant-job-continue-on-error|mutant-job-if-false|mutant-job-if-post-steps-expression|mutant-job-quoted-continue-on-error|mutant-job-quoted-if-false|mutant-job-yaml-alias-continue-on-error|mutant-job-yaml-alias-if-false|mutant-jobs-key-in-block-scalar|mutant-missing-sentinel|mutant-or-true-paren|mutant-or-true|mutant-prestep-bashenv-forged-output|mutant-prestep-github-path-python-poison|mutant-semicolon-true|mutant-sentinel-case-inert-guard|mutant-sentinel-echo-only-failure|mutant-sentinel-exit-in-else-branch|mutant-sentinel-false-and-brace-group|mutant-sentinel-heredoc-inert|mutant-sentinel-heredoc-numeric-delimiter|mutant-sentinel-exit-zero-expression|mutant-sentinel-fake-outcome-comparison|mutant-sentinel-invalid-proof-echo-branch|mutant-sentinel-invalid-proof-elif-exit|mutant-sentinel-invalid-proof-nested-inert-exit|mutant-sentinel-missing-proof-elif-exit|mutant-sentinel-missing-proof-nested-inert-exit|mutant-sentinel-outcome-elif-exit|mutant-sentinel-outcome-nested-inert-exit|mutant-sentinel-proof-array-overwrite|mutant-sentinel-proof-declare-overwrite|mutant-sentinel-proof-nameref-overwrite|mutant-sentinel-proof-parameter-default|mutant-sentinel-proof-overwrite-constant|mutant-sentinel-quoted-continue-on-error|mutant-sentinel-skipped-or-group|mutant-sentinel-split-line-function|mutant-sentinel-step-if-skipped|mutant-sentinel-trap-exit-zero|mutant-sentinel-uncalled-function|mutant-sentinel-unreachable-invalid-proof-guard|mutant-sentinel-unreachable-missing-proof-guard|mutant-sentinel-while-false-inert-guard|mutant-step-if-expression-run|mutant-step-quoted-continue-on-error|mutant-step-quoted-if-run|mutant-workflow-default-shell-alias-or-true|mutant-workflow-default-shell-flow-map-or-true|mutant-workflow-default-shell-merge-key-or-true|mutant-workflow-default-shell-or-true|mutant-workflow-default-shell-run-alias-or-true|skipped-run_gates-mutant)\.yml)$'
+ALLOWED="${ALLOWED/mutant-prestep-bashenv-forged-output|mutant-prestep-github-path-python-poison/mutant-job-env-bashenv-obfuscated-output|mutant-prestep-bashenv-forged-output|mutant-prestep-github-path-chocolatey-poison|mutant-prestep-github-path-python-poison|mutant-prestep-heredoc-github-output-proof-write|mutant-prestep-indirect-github-output-proof-write}"
 TRACKED_FILES="$WORK/tracked-files.txt"
 if ! git ls-files >"$TRACKED_FILES"; then
   fail "G-18 tracked file scan completed" "git ls-files failed"
@@ -287,8 +288,12 @@ mutant-forged-proof-output.yml
 mutant-gates-extraction-service-name-collision.yml
 mutant-gate-steps-hidden-in-shell-string.yml
 mutant-gates-needs-skipped-blocker.yml
+mutant-job-env-bashenv-obfuscated-output.yml
 mutant-prestep-bashenv-forged-output.yml
+mutant-prestep-github-path-chocolatey-poison.yml
 mutant-prestep-github-path-python-poison.yml
+mutant-prestep-heredoc-github-output-proof-write.yml
+mutant-prestep-indirect-github-output-proof-write.yml
 mutant-job-default-shell-alias-or-true.yml
 mutant-job-default-shell-flow-map-or-true.yml
 mutant-job-default-shell-merge-key-or-true.yml

@@ -153,6 +153,14 @@ top_defaults = [
     and parsed["key"] == "defaults"
 ]
 
+top_env = [
+    index for index, line in enumerate(lines)
+    if not SCALAR_LINES[index]
+    and (parsed := parse_key(line))
+    and parsed["indent"] == 0
+    and parsed["key"] == "env"
+]
+
 if len(top_jobs) != 1:
     fail(f"expected exactly one top-level jobs: key, found {len(top_jobs)}")
     top_jobs_index = None
@@ -221,6 +229,7 @@ def parse_steps(steps_index, steps_end):
             "start": index,
             "end": None,
             "keys": {},
+            "key_indexes": {},
             "key_counts": {},
             "run_style": "",
             "run_lines": [],
@@ -235,6 +244,7 @@ def parse_steps(steps_index, steps_end):
                 if parsed and parsed["indent"] == 8:
                     key = parsed["key"]
                     step["keys"][key] = parsed["value"]
+                    step["key_indexes"].setdefault(key, []).append(cursor)
                     step["key_counts"][key] = step["key_counts"].get(key, 0) + 1
                     if key == "run":
                         step["run_style"] = scalar_style(parsed["value"])
@@ -388,12 +398,54 @@ def branch_exits_before_else_or_fi(exec_lines, start_index):
     return False
 
 
+FORBIDDEN_ENV_KEYS = {
+    "BASH_ENV",
+    "GITHUB_ENV",
+    "GITHUB_PATH",
+    "PYTHON",
+    "PYTHONPATH",
+}
+
+
+def inspect_env_block(env_index, env_indent, context):
+    env_value = parse_key(lines[env_index])["value"]
+    if reject_inline_map_value(f"{context}.env", env_value):
+        return
+    env_end = block_end(env_index, env_indent, SCALAR_LINES)
+    reject_merge_keys(env_index, env_end, env_indent, f"{context}.env")
+    for index in range(env_index + 1, env_end):
+        if SCALAR_LINES[index]:
+            continue
+        parsed = parse_key(lines[index])
+        if not parsed or parsed["indent"] != env_indent + 2:
+            continue
+        if parsed["key"] in FORBIDDEN_ENV_KEYS:
+            fail(f"{context}.env must not define {parsed['key']}")
+
+
 def writes_execution_proof_output(run_lines):
-    for line in executable_lines(run_lines):
-        code = line.split("#", 1)[0]
-        if "GITHUB_OUTPUT" in code and "vt_g19_exec_proof" in code:
-            return True
+    code_lines = [line.split("#", 1)[0] for line in executable_lines(run_lines)]
+    joined = "\n".join(code_lines)
+    if "GITHUB_OUTPUT" not in joined:
+        return False
+    if "vt_g19_exec_proof" in joined:
+        return True
+    lowered = joined.lower()
+    if "proof" in lowered and ("vt_g19" in lowered or "exec_proof" in lowered):
+        return True
     return False
+
+
+ALLOWED_GITHUB_PATH_LINE = r'"C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append'
+
+
+def allowed_github_path_write(step, code):
+    return (
+        step["name"] == "Install SQLite on Windows"
+        and strip_quotes(step["keys"].get("if", "")) == "runner.os == 'Windows'"
+        and strip_quotes(step["keys"].get("shell", "")) == "pwsh"
+        and code == ALLOWED_GITHUB_PATH_LINE
+    )
 
 
 def forbidden_environment_mutation(step):
@@ -406,10 +458,14 @@ def forbidden_environment_mutation(step):
         if re.search(r'(^|[\s;])(export\s+)?(BASH_ENV|PYTHON|PYTHONPATH)=', code):
             return "shell environment"
         if "GITHUB_PATH" in code:
-            if step["name"] == "Install SQLite on Windows" and "chocolatey" in code.lower():
+            if allowed_github_path_write(step, code):
                 continue
             return "GITHUB_PATH"
     return ""
+
+
+for env_index in top_env:
+    inspect_env_block(env_index, 0, "workflow")
 
 
 if top_jobs_index is not None:
@@ -432,6 +488,10 @@ if top_jobs_index is not None:
         for _, key, _ in gate_controls:
             if key in {"if", "continue-on-error", "needs"}:
                 fail(f"job-level {key} found on gates job")
+
+        env_indexes = [index for index, key, _ in gate_controls if key == "env"]
+        for env_index in env_indexes:
+            inspect_env_block(env_index, 4, "jobs.gates")
 
         defaults_indexes = [index for index, key, _ in gate_controls if key == "defaults"]
         for defaults_index in defaults_indexes:
@@ -465,6 +525,8 @@ if top_jobs_index is not None:
             steps = parse_steps(steps_index, block_end(steps_index, 4, SCALAR_LINES))
 
         for step in steps:
+            for env_index in step["key_indexes"].get("env", []):
+                inspect_env_block(env_index, 8, f"step {step['name']}")
             if writes_execution_proof_output(step["run_lines"]):
                 fail("workflow must not write vt_g19_exec_proof directly through GITHUB_OUTPUT")
             env_mutation = forbidden_environment_mutation(step)
