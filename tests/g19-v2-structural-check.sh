@@ -9,7 +9,17 @@ if [ -z "$WORKFLOW" ] || [ ! -f "$WORKFLOW" ]; then
   exit 1
 fi
 
-python - "$WORKFLOW" <<'PY'
+PYTHON_BIN=""
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python3)"
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python)"
+else
+  echo "G-19 FAIL: structural checker requires python3 or python on PATH"
+  exit 1
+fi
+
+"$PYTHON_BIN" - "$WORKFLOW" <<'PY'
 import re
 import sys
 
@@ -294,6 +304,10 @@ def contains_function_definition(exec_lines):
 def contains_unsupported_sentinel_control(exec_lines):
     for line in exec_lines:
         code = line.split("#", 1)[0].strip()
+        if re.search(r'(\|\||&&)\s*\{', code):
+            return True
+        if re.match(r'^[{}]\s*$', code):
+            return True
         if re.match(r'^(while|until|for|select|case)\b', code):
             return True
         if re.match(r'^(do|done|esac)\b', code):
@@ -311,6 +325,12 @@ def proof_mutation_lines(exec_lines):
     for line in exec_lines:
         code = line.split("#", 1)[0].strip()
         if not code or PROOF_ASSIGNMENT_PATTERN.match(code):
+            continue
+        if re.search(r'\$\{PROOF(?::[-=]|=)', code):
+            mutations.append(line)
+            continue
+        if re.match(r'^(declare|local|typeset)\b', code) and re.search(r'(^|[\s;])-[-A-Za-z]*n[-A-Za-z]*(\s|$)', code):
+            mutations.append(line)
             continue
         if re.match(r'^PROOF(\+)?=', code) or re.match(r'^PROOF\[[^]]+\](\+)?=', code):
             mutations.append(line)
@@ -368,6 +388,30 @@ def branch_exits_before_else_or_fi(exec_lines, start_index):
     return False
 
 
+def writes_execution_proof_output(run_lines):
+    for line in executable_lines(run_lines):
+        code = line.split("#", 1)[0]
+        if "GITHUB_OUTPUT" in code and "vt_g19_exec_proof" in code:
+            return True
+    return False
+
+
+def forbidden_environment_mutation(step):
+    for line in executable_lines(step["run_lines"]):
+        code = line.split("#", 1)[0].strip()
+        if "GITHUB_ENV" in code:
+            return "GITHUB_ENV"
+        if "BASH_ENV" in code:
+            return "BASH_ENV"
+        if re.search(r'(^|[\s;])(export\s+)?(BASH_ENV|PYTHON|PYTHONPATH)=', code):
+            return "shell environment"
+        if "GITHUB_PATH" in code:
+            if step["name"] == "Install SQLite on Windows" and "chocolatey" in code.lower():
+                continue
+            return "GITHUB_PATH"
+    return ""
+
+
 if top_jobs_index is not None:
     jobs_end = block_end(top_jobs_index, 0, SCALAR_LINES)
     gates = []
@@ -412,9 +456,6 @@ if top_jobs_index is not None:
                     if contains_neutralizer(value):
                         fail("jobs.gates.defaults.run.shell contains a neutralizer")
 
-        if any("GITHUB_OUTPUT" in lines[index] for index in range(gates_index, gates_end)):
-            fail("workflow must not write execution proof directly through GITHUB_OUTPUT")
-
         steps_indexes = find_direct_child(gates_index, gates_end, 2, "steps")
         if len(steps_indexes) != 1:
             fail(f"expected exactly one jobs.gates.steps block, found {len(steps_indexes)}")
@@ -422,6 +463,13 @@ if top_jobs_index is not None:
         else:
             steps_index = steps_indexes[0]
             steps = parse_steps(steps_index, block_end(steps_index, 4, SCALAR_LINES))
+
+        for step in steps:
+            if writes_execution_proof_output(step["run_lines"]):
+                fail("workflow must not write vt_g19_exec_proof directly through GITHUB_OUTPUT")
+            env_mutation = forbidden_environment_mutation(step)
+            if env_mutation:
+                fail(f"workflow must not mutate {env_mutation} in the gates job")
 
         gate_steps = [step for step in steps if step["name"] == GATE_STEP_NAME]
         sentinel_steps = [step for step in steps if step["name"] == SENTINEL_STEP_NAME]
