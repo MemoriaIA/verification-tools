@@ -49,6 +49,7 @@ def decode_double_quoted_key(value):
     def replace_unicode(match):
         return chr(int(match.group(1), 16))
 
+    value = re.sub(r'\\x([0-9A-Fa-f]{2})', replace_unicode, value)
     value = re.sub(r'\\u([0-9A-Fa-f]{4})', replace_unicode, value)
     value = re.sub(r'\\U([0-9A-Fa-f]{8})', replace_unicode, value)
     replacements = {
@@ -255,6 +256,9 @@ def parse_steps(steps_index, steps_end):
             continue
         item = parse_step_item(lines[index])
         if not item or item["indent"] != 6:
+            stripped = lines[index].strip()
+            if stripped.startswith("- {") or stripped.startswith("- ["):
+                fail("jobs.gates.steps must not use flow-style step items")
             index += 1
             continue
         step = {
@@ -307,7 +311,12 @@ def record_step_key(step, key, value, index, effective_indent):
         step["key_counts"][key] = step["key_counts"].get(key, 0) + 1
         if key == "run":
             step["run_style"] = scalar_style(value)
-            step["run_lines"] = collect_run_lines(index, effective_indent)
+            if scalar_value(value):
+                step["run_lines"] = collect_run_lines(index, effective_indent)
+            elif value:
+                step["run_lines"] = [strip_quotes(value)]
+            else:
+                step["run_lines"] = []
 
 
 def executable_lines(run_lines):
@@ -390,7 +399,7 @@ def proof_mutation_lines(exec_lines):
         code = line.split("#", 1)[0].strip()
         if not code or PROOF_ASSIGNMENT_PATTERN.match(code):
             continue
-        if re.search(r'(^|[;&|]\s*)((builtin|command)\s+)?(declare|local|typeset)\b[^#;&|]*(^|[\s;])-[-A-Za-z]*n[-A-Za-z]*(\s|$)', code):
+        if re.search(r'(^|[;&|]\s*)(\\?(builtin|command)\s+)?\\?(declare|local|typeset)\b[^#;&|]*(^|[\s;])-[-A-Za-z]*n[-A-Za-z]*(\s|$)', code):
             mutations.append(line)
             continue
         if re.search(r'\$\{PROOF(?::[-=]|=)', code):
@@ -467,7 +476,15 @@ FORBIDDEN_ENV_KEYS = {
 
 
 def inspect_env_block(env_index, env_indent, context):
-    env_value = parse_key(lines[env_index])["value"]
+    parsed_env = parse_key(lines[env_index])
+    if parsed_env:
+        env_value = parsed_env["value"]
+    else:
+        item = parse_step_item(lines[env_index])
+        if not item or item["key"] != "env":
+            fail(f"{context}.env is not a parseable block")
+            return
+        env_value = item["value"]
     if reject_inline_map_value(f"{context}.env", env_value):
         return
     env_end = block_end(env_index, env_indent, SCALAR_LINES)
@@ -554,7 +571,7 @@ def forbidden_environment_mutation(step):
     code_lines = [line.split("#", 1)[0].strip() for line in executable_lines(step["run_lines"])]
     for line in executable_lines(step["run_lines"]):
         code = line.split("#", 1)[0].strip()
-        if re.search(r'(^|[;&|]\s*)eval\b', code):
+        if re.search(r'(^|[^A-Za-z0-9_])\\?eval\b', code):
             return "computed environment file"
         if "GITHUB_ENV" in code:
             return "GITHUB_ENV"
