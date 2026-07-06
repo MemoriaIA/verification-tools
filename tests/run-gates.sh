@@ -235,6 +235,7 @@ ALLOWED='^(README\.md|SECURITY\.md|DISCLAIMER\.md|LICENSE|\.gitignore|\.gitattri
 ALLOWED="${ALLOWED/mutant-prestep-bashenv-forged-output|mutant-prestep-github-path-python-poison/mutant-job-env-bashenv-obfuscated-output|mutant-prestep-bashenv-forged-output|mutant-prestep-github-path-chocolatey-poison|mutant-prestep-github-path-python-poison|mutant-prestep-heredoc-github-output-proof-write|mutant-prestep-indirect-github-output-proof-write}"
 ALLOWED="${ALLOWED/mutant-job-env-bashenv-obfuscated-output/mutant-gates-merge-key-bypass|mutant-job-env-bashenv-obfuscated-output}"
 ALLOWED="${ALLOWED/mutant-prestep-indirect-github-output-proof-write/mutant-prestep-computed-github-output-proof-write|mutant-prestep-indirect-github-output-proof-write|mutant-prestep-obfuscated-env-poison}"
+ALLOWED="${ALLOWED/mutant-prestep-obfuscated-env-poison/mutant-prestep-obfuscated-env-poison|mutant-prestep-split-github-env-bashenv|mutant-prestep-split-github-output-proof|mutant-prestep-split-github-path}"
 ALLOWED="${ALLOWED/mutant-step-if-expression-run/mutant-step-if-expression-run|mutant-step-uses-upload-artifact}"
 TRACKED_FILES="$WORK/tracked-files.txt"
 if ! git ls-files >"$TRACKED_FILES"; then
@@ -300,6 +301,9 @@ mutant-prestep-github-path-python-poison.yml
 mutant-prestep-heredoc-github-output-proof-write.yml
 mutant-prestep-indirect-github-output-proof-write.yml
 mutant-prestep-obfuscated-env-poison.yml
+mutant-prestep-split-github-env-bashenv.yml
+mutant-prestep-split-github-output-proof.yml
+mutant-prestep-split-github-path.yml
 mutant-job-default-shell-alias-or-true.yml
 mutant-job-default-shell-flow-map-or-true.yml
 mutant-job-default-shell-merge-key-or-true.yml

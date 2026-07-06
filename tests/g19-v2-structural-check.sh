@@ -487,6 +487,14 @@ def forbidden_environment_mutation(step):
     )
     if has_env_file_fragments and not any(allowed_github_path_write(step, code) for code in code_lines):
         return "environment file"
+    if not any(allowed_github_path_write(step, code) for code in code_lines):
+        has_append = ">>" in joined or "out-file" in lowered
+        has_indirect_lookup = (
+            "printenv" in lowered
+            or re.search(r'\$\{!\s*[A-Za-z_][A-Za-z0-9_]*\s*\}', joined) is not None
+        )
+        if has_append and has_indirect_lookup:
+            return "computed environment file"
     return ""
 
 

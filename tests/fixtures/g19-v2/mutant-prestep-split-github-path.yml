@@ -1,0 +1,28 @@
+name: Verification Tools CI
+jobs:
+  gates:
+    steps:
+      - name: Split-token GITHUB_PATH poison
+        run: |
+          g0=GITHUB_
+          p1=PA
+          p2=TH
+          target="$(printenv "${g0}${p1}${p2}")"
+          echo "/tmp/poison-bin" >> "$target"
+      - name: Run verification gate suite
+        id: run_gates
+        run: |
+          bash tests/run-gates.sh
+      - name: G-19 CI anti-theater (run-gates execution proof required)
+        if: always()
+        run: |
+          if [ "${{ steps.run_gates.outcome }}" != "success" ]; then
+            exit 1
+          fi
+          PROOF="${{ steps.run_gates.outputs.vt_g19_exec_proof }}"
+          if [ -z "$PROOF" ]; then
+            exit 1
+          fi
+          if ! printf '%s\n' "$PROOF" | grep -qE '^[0-9a-f]{64}$'; then
+            exit 1
+          fi
