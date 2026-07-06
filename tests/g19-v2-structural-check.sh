@@ -45,7 +45,7 @@ KEY_RE = re.compile(r'^(\s*)(?:"([^"]+)"|\'([^\']+)\'|(<<)|([A-Za-z0-9_-]+))\s*:
 STEP_ITEM_RE = re.compile(r'^(\s*)-\s*(?:(?:"([^"]+)"|\'([^\']+)\'|([A-Za-z0-9_-]+))\s*:\s*(.*))?\s*$')
 
 
-def decode_double_quoted_key(value):
+def decode_double_quoted_scalar(value):
     def replace_unicode(match):
         return chr(int(match.group(1), 16))
 
@@ -65,6 +65,10 @@ def decode_double_quoted_key(value):
     for escaped, replacement in replacements.items():
         value = value.replace(escaped, replacement)
     return value
+
+
+def decode_double_quoted_key(value):
+    return decode_double_quoted_scalar(value)
 
 
 def normalize_key(double_quoted, single_quoted, bare):
@@ -247,6 +251,61 @@ def collect_run_lines(run_index, run_indent):
     return collected
 
 
+def unescaped_quote_count(value):
+    count = 0
+    escaped = False
+    for char in value:
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == '"':
+            count += 1
+    return count
+
+
+def quoted_content(value, quote):
+    start = value.find(quote)
+    if start < 0:
+        return value
+    escaped = False
+    for index in range(start + 1, len(value)):
+        char = value[index]
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\" and quote == '"':
+            escaped = True
+            continue
+        if char == quote:
+            return value[start + 1:index]
+    return value[start + 1:]
+
+
+def collect_inline_run_lines(run_index, run_indent, value):
+    raw = value.strip()
+    if not raw:
+        return []
+    if raw.startswith('"'):
+        parts = [raw]
+        if unescaped_quote_count(raw) < 2:
+            index = run_index + 1
+            while index < len(lines):
+                if lines[index].strip() and not SCALAR_LINES[index] and indent_of(lines[index]) <= run_indent:
+                    break
+                cut = min(len(lines[index]), run_indent + 2)
+                parts.append(lines[index][cut:] if len(lines[index]) >= cut else "")
+                if unescaped_quote_count(" ".join(parts)) >= 2:
+                    break
+                index += 1
+        return [decode_double_quoted_scalar(quoted_content(" ".join(part.strip() for part in parts), '"'))]
+    if raw.startswith("'"):
+        return [quoted_content(raw, "'").replace("''", "'")]
+    return [strip_quotes(raw)]
+
+
 def parse_steps(steps_index, steps_end):
     steps = []
     index = steps_index + 1
@@ -257,7 +316,9 @@ def parse_steps(steps_index, steps_end):
         item = parse_step_item(lines[index])
         if not item or item["indent"] != 6:
             stripped = lines[index].strip()
-            if stripped.startswith("- {") or stripped.startswith("- ["):
+            if re.match(r'^-\s*[&*]', stripped):
+                fail("jobs.gates.steps must not use YAML anchors or aliases")
+            elif re.match(r'^-\s*(?:&[A-Za-z0-9_-]+\s+)?[\{\[]', stripped):
                 fail("jobs.gates.steps must not use flow-style step items")
             index += 1
             continue
@@ -310,11 +371,13 @@ def record_step_key(step, key, value, index, effective_indent):
         step["key_indexes"].setdefault(key, []).append(index)
         step["key_counts"][key] = step["key_counts"].get(key, 0) + 1
         if key == "run":
+            if re.match(r'^[&*]', value.strip()):
+                fail("jobs.gates run values must not use YAML anchors or aliases")
             step["run_style"] = scalar_style(value)
             if scalar_value(value):
                 step["run_lines"] = collect_run_lines(index, effective_indent)
             elif value:
-                step["run_lines"] = [strip_quotes(value)]
+                step["run_lines"] = collect_inline_run_lines(index, effective_indent, value)
             else:
                 step["run_lines"] = []
 
@@ -393,31 +456,47 @@ def contains_unsupported_sentinel_control(exec_lines):
 PROOF_ASSIGNMENT_PATTERN = re.compile(r'^PROOF="\$\{\{\s*steps\.run_gates\.outputs\.vt_g19_exec_proof\s*\}\}"$')
 
 
+def normalize_shell_escapes(code):
+    return re.sub(r'\\([A-Za-z0-9_./:=@%+\-])', r'\1', code)
+
+
+def normalize_shell_words(code):
+    normalized = normalize_shell_escapes(code)
+    normalized = re.sub(r"\$'([^']*)'", r"\1", normalized)
+    normalized = re.sub(r'\$"([^"]*)"', r"\1", normalized)
+    normalized = normalized.replace("'", "").replace('"', "")
+    return normalized
+
+
 def proof_mutation_lines(exec_lines):
     mutations = []
     for line in exec_lines:
         code = line.split("#", 1)[0].strip()
         if not code or PROOF_ASSIGNMENT_PATTERN.match(code):
             continue
-        if re.search(r'(^|[;&|]\s*)(\\?(builtin|command)\s+)?\\?(declare|local|typeset)\b[^#;&|]*(^|[\s;])-[-A-Za-z]*n[-A-Za-z]*(\s|$)', code):
+        normalized = normalize_shell_words(code)
+        if re.search(r'(^|[;&|]\s*)(?:(?:builtin|command)\s+)*(declare|local|typeset)\b', normalized) and re.search(r'(^|[\s;])-\$\{?[A-Za-z_][A-Za-z0-9_]*\}?', normalized):
             mutations.append(line)
             continue
-        if re.search(r'\$\{PROOF(?::[-=]|=)', code):
+        if re.search(r'(^|[;&|]\s*)(?:(?:builtin|command)\s+)*(declare|local|typeset)\b[^#;&|]*(^|[\s;])-[-A-Za-z]*n[-A-Za-z]*(\s|$)', normalized):
             mutations.append(line)
             continue
-        if re.match(r'^(declare|local|typeset)\b', code) and re.search(r'(^|[\s;])-[-A-Za-z]*n[-A-Za-z]*(\s|$)', code):
+        if re.search(r'\$\{PROOF(?::[-=]|=)', normalized):
             mutations.append(line)
             continue
-        if re.match(r'^PROOF(\+)?=', code) or re.match(r'^PROOF\[[^]]+\](\+)?=', code):
+        if re.match(r'^(declare|local|typeset)\b', normalized) and re.search(r'(^|[\s;])-[-A-Za-z]*n[-A-Za-z]*(\s|$)', normalized):
             mutations.append(line)
             continue
-        if re.match(r'^(declare|local|typeset|export|readonly)\b.*(^|[\s;])PROOF(\b|=)', code):
+        if re.match(r'^PROOF(\+)?=', normalized) or re.match(r'^PROOF\[[^]]+\](\+)?=', normalized):
             mutations.append(line)
             continue
-        if re.match(r'^unset\b.*(^|[\s;])PROOF\b', code):
+        if re.match(r'^(declare|local|typeset|export|readonly)\b.*(^|[\s;])PROOF(\b|=)', normalized):
             mutations.append(line)
             continue
-        if re.search(r'\b(read|printf\s+-v|eval)\b.*\bPROOF\b', code):
+        if re.match(r'^unset\b.*(^|[\s;])PROOF\b', normalized):
+            mutations.append(line)
+            continue
+        if re.search(r'\b(read|printf\s+-v|eval)\b.*\bPROOF\b', normalized):
             mutations.append(line)
     return mutations
 
@@ -498,10 +577,12 @@ def inspect_env_block(env_index, env_indent, context):
         env_key = parsed["key"].upper()
         if env_key in FORBIDDEN_ENV_KEYS:
             fail(f"{context}.env must not define {env_key}")
+        if re.match(r'^BASH_FUNC_.*%%$', env_key):
+            fail(f"{context}.env must not define Bash function export key {env_key}")
 
 
 def writes_execution_proof_output(run_lines):
-    code_lines = [line.split("#", 1)[0] for line in executable_lines(run_lines)]
+    code_lines = [normalize_shell_words(line.split("#", 1)[0]) for line in executable_lines(run_lines)]
     joined = "\n".join(code_lines)
     lowered = joined.lower()
     proof_key_present = (
@@ -568,10 +649,18 @@ def allowed_github_path_write(step, code):
 
 
 def forbidden_environment_mutation(step):
-    code_lines = [line.split("#", 1)[0].strip() for line in executable_lines(step["run_lines"])]
+    raw_code_lines = [line.split("#", 1)[0].strip() for line in executable_lines(step["run_lines"])]
+    code_lines = [normalize_shell_words(line) for line in raw_code_lines]
     for line in executable_lines(step["run_lines"]):
-        code = line.split("#", 1)[0].strip()
-        if re.search(r'(^|[^A-Za-z0-9_])\\?eval\b', code):
+        raw_code = line.split("#", 1)[0].strip()
+        code = normalize_shell_words(raw_code)
+        if re.search(r'(^|[^A-Za-z0-9_])eval\b', code):
+            return "computed environment file"
+        if re.search(r'(^|[;&|]\s*)\$\{?[A-Za-z_][A-Za-z0-9_]*\}?(?=\s|$)', code):
+            return "computed environment file"
+        if re.search(r'(^|[;&|]\s*)(bash|sh|dash|zsh|ksh)\s+[^#;&|]*-c(\s|$)', code):
+            return "computed environment file"
+        if re.search(r'(^|[;&|]\s*)(python[0-9.]*|node|perl|ruby|php)\s+[^#;&|]*(?:-c|-e|-r)(\s|$)', code):
             return "computed environment file"
         if "GITHUB_ENV" in code:
             return "GITHUB_ENV"
@@ -579,8 +668,8 @@ def forbidden_environment_mutation(step):
             return "BASH_ENV"
         if re.search(r'(^|[\s;])(export\s+)?(BASH_ENV|PATH|PYTHON|PYTHONPATH)=', code):
             return "shell environment"
-        if "GITHUB_PATH" in code:
-            if allowed_github_path_write(step, code):
+        if "GITHUB_PATH" in raw_code or "GITHUB_PATH" in code:
+            if allowed_github_path_write(step, raw_code):
                 continue
             return "GITHUB_PATH"
     joined = "\n".join(code_lines)
@@ -595,9 +684,9 @@ def forbidden_environment_mutation(step):
             or ("bash" in lowered and has_env_fragment)
         )
     )
-    if has_env_file_fragments and not any(allowed_github_path_write(step, code) for code in code_lines):
+    if has_env_file_fragments and not any(allowed_github_path_write(step, code) for code in raw_code_lines):
         return "environment file"
-    if not any(allowed_github_path_write(step, code) for code in code_lines):
+    if not any(allowed_github_path_write(step, code) for code in raw_code_lines):
         has_append = ">>" in joined or "out-file" in lowered
         has_indirect_lookup = (
             "printenv" in lowered
