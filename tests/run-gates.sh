@@ -239,6 +239,19 @@ ALLOWED="${ALLOWED/mutant-prestep-obfuscated-env-poison/mutant-prestep-obfuscate
 ALLOWED="${ALLOWED/mutant-step-if-expression-run/mutant-step-if-expression-run|mutant-step-uses-upload-artifact}"
 ALLOWED="${ALLOWED/baseline-unrelated-github-output/baseline-unrelated-github-output|baseline-windows-github-path-single-quote}"
 ALLOWED="${ALLOWED/mutant-step-if-expression-run/mutant-step-if-expression-run|mutant-step-merge-key-continue-on-error}"
+ALLOWED="${ALLOWED/baseline-windows-github-path-single-quote/baseline-anonymous-checkout|baseline-quoted-env-key|baseline-windows-github-path-single-quote}"
+ALLOWED="${ALLOWED/mutant-direct-github-output-proof-write/mutant-anonymous-run-bashenv-github-env|mutant-anonymous-uses-upload-artifact|mutant-direct-github-output-proof-write}"
+ALLOWED="${ALLOWED/mutant-job-env-bashenv-obfuscated-output/mutant-escaped-bashenv-key|mutant-escaped-github-env-key|mutant-escaped-github-path-key|mutant-escaped-pythonpath-key|mutant-job-env-bashenv-obfuscated-output}"
+ALLOWED="${ALLOWED/mutant-job-env-path-poison/mutant-job-env-path-poison}"
+ALLOWED="${ALLOWED/mutant-prestep-eval-github-env-bashenv/mutant-prestep-eval-github-env-bashenv}"
+ALLOWED="${ALLOWED/mutant-prestep-eval-github-path-poison/mutant-prestep-eval-github-path-poison}"
+ALLOWED="${ALLOWED/mutant-prestep-eval-github-output-proof/mutant-prestep-eval-github-output-proof}"
+ALLOWED="${ALLOWED/mutant-sentinel-proof-builtin-nameref-overwrite/mutant-sentinel-proof-builtin-nameref-overwrite}"
+ALLOWED="${ALLOWED/mutant-sentinel-proof-command-nameref-overwrite/mutant-sentinel-proof-command-nameref-overwrite}"
+ALLOWED="${ALLOWED/mutant-sentinel-proof-chained-builtin-nameref-overwrite/mutant-sentinel-proof-chained-builtin-nameref-overwrite}"
+ALLOWED="${ALLOWED/mutant-step-env-path-poison/mutant-step-env-path-poison}"
+ALLOWED="${ALLOWED/mutant-workflow-env-path-poison/mutant-workflow-env-path-poison}"
+ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|mutant-job-env-path-poison|mutant-prestep-eval-github-env-bashenv|mutant-prestep-eval-github-path-poison|mutant-prestep-eval-github-output-proof|mutant-sentinel-proof-builtin-nameref-overwrite|mutant-sentinel-proof-command-nameref-overwrite|mutant-sentinel-proof-chained-builtin-nameref-overwrite|mutant-step-env-path-poison|mutant-workflow-env-path-poison}"
 TRACKED_FILES="$WORK/tracked-files.txt"
 if ! git ls-files >"$TRACKED_FILES"; then
   fail "G-18 tracked file scan completed" "git ls-files failed"
@@ -281,14 +294,22 @@ if [ "$FAILED" -eq 0 ]; then pass "G-19 v2 structural check"; fi
 G19_FIXTURE_DIR="tests/fixtures/g19-v2"
 G19_BASELINE_FIXTURES="
 baseline-good.yml
+baseline-anonymous-checkout.yml
+baseline-quoted-env-key.yml
 baseline-unrelated-github-output.yml
 baseline-windows-github-path-single-quote.yml
 "
 G19_MUTANT_FIXTURES="
 missing-proof-mutant.yml
+mutant-anonymous-run-bashenv-github-env.yml
+mutant-anonymous-uses-upload-artifact.yml
 mutant-comment-only-sentinel.yml
 mutant-continue-on-error.yml
 mutant-direct-github-output-proof-write.yml
+mutant-escaped-bashenv-key.yml
+mutant-escaped-github-env-key.yml
+mutant-escaped-github-path-key.yml
+mutant-escaped-pythonpath-key.yml
 mutant-folded-subshell-true-paren.yml
 mutant-forged-indirect-output-unreachable.yml
 mutant-forged-proof-output.yml
@@ -297,8 +318,12 @@ mutant-gates-merge-key-bypass.yml
 mutant-gate-steps-hidden-in-shell-string.yml
 mutant-gates-needs-skipped-blocker.yml
 mutant-job-env-bashenv-obfuscated-output.yml
+mutant-job-env-path-poison.yml
 mutant-prestep-bashenv-forged-output.yml
 mutant-prestep-computed-github-output-proof-write.yml
+mutant-prestep-eval-github-env-bashenv.yml
+mutant-prestep-eval-github-output-proof.yml
+mutant-prestep-eval-github-path-poison.yml
 mutant-prestep-github-path-chocolatey-poison.yml
 mutant-prestep-github-path-python-poison.yml
 mutant-prestep-heredoc-github-output-proof-write.yml
@@ -341,6 +366,9 @@ mutant-sentinel-missing-proof-nested-inert-exit.yml
 mutant-sentinel-outcome-elif-exit.yml
 mutant-sentinel-outcome-nested-inert-exit.yml
 mutant-sentinel-proof-array-overwrite.yml
+mutant-sentinel-proof-builtin-nameref-overwrite.yml
+mutant-sentinel-proof-chained-builtin-nameref-overwrite.yml
+mutant-sentinel-proof-command-nameref-overwrite.yml
 mutant-sentinel-proof-declare-overwrite.yml
 mutant-sentinel-proof-nameref-overwrite.yml
 mutant-sentinel-proof-parameter-default.yml
@@ -356,9 +384,11 @@ mutant-sentinel-unreachable-missing-proof-guard.yml
 mutant-sentinel-while-false-inert-guard.yml
 mutant-step-if-expression-run.yml
 mutant-step-merge-key-continue-on-error.yml
+mutant-step-env-path-poison.yml
 mutant-step-quoted-continue-on-error.yml
 mutant-step-quoted-if-run.yml
 mutant-step-uses-upload-artifact.yml
+mutant-workflow-env-path-poison.yml
 mutant-workflow-default-shell-alias-or-true.yml
 mutant-workflow-default-shell-flow-map-or-true.yml
 mutant-workflow-default-shell-merge-key-or-true.yml
