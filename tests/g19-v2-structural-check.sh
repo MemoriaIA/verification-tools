@@ -426,12 +426,23 @@ def inspect_env_block(env_index, env_indent, context):
 def writes_execution_proof_output(run_lines):
     code_lines = [line.split("#", 1)[0] for line in executable_lines(run_lines)]
     joined = "\n".join(code_lines)
-    if "GITHUB_OUTPUT" not in joined:
-        return False
-    if "vt_g19_exec_proof" in joined:
-        return True
     lowered = joined.lower()
-    if "proof" in lowered and ("vt_g19" in lowered or "exec_proof" in lowered):
+    proof_key_present = (
+        "vt_g19_exec_proof" in joined
+        or ("vt_g19" in lowered and "proof" in lowered)
+        or ("vt_g19_exec" in lowered and "printf proof" in lowered)
+    )
+    output_path_present = (
+        "GITHUB_OUTPUT" in joined
+        or ("github_" in lowered and "output" in lowered)
+        or ("printenv" in lowered and "output" in lowered)
+    )
+    output_write_present = (
+        ">>" in joined
+        or re.search(r'\btee\b.*\$', joined) is not None
+        or "out-file" in lowered
+    )
+    if proof_key_present and output_path_present and output_write_present:
         return True
     return False
 
@@ -449,6 +460,7 @@ def allowed_github_path_write(step, code):
 
 
 def forbidden_environment_mutation(step):
+    code_lines = [line.split("#", 1)[0].strip() for line in executable_lines(step["run_lines"])]
     for line in executable_lines(step["run_lines"]):
         code = line.split("#", 1)[0].strip()
         if "GITHUB_ENV" in code:
@@ -461,7 +473,37 @@ def forbidden_environment_mutation(step):
             if allowed_github_path_write(step, code):
                 continue
             return "GITHUB_PATH"
+    joined = "\n".join(code_lines)
+    lowered = joined.lower()
+    has_env_fragment = re.search(r'(^|[^a-z0-9_])env([^a-z0-9_]|$)', lowered) is not None
+    has_path_fragment = re.search(r'(^|[^a-z0-9_])path([^a-z0-9_]|$)', lowered) is not None
+    has_env_file_fragments = (
+        ">>" in joined
+        and (
+            ("github" in lowered and has_env_fragment)
+            or ("github" in lowered and has_path_fragment)
+            or ("bash" in lowered and has_env_fragment)
+        )
+    )
+    if has_env_file_fragments and not any(allowed_github_path_write(step, code) for code in code_lines):
+        return "environment file"
     return ""
+
+
+ALLOWED_USES = {
+    "actions/checkout@v4",
+    "actions/setup-python@v5",
+}
+
+
+def inspect_uses_step(step):
+    if "uses" not in step["keys"]:
+        return
+    uses_value = strip_quotes(step["keys"]["uses"])
+    if uses_value not in ALLOWED_USES:
+        fail(f"workflow uses step is not allowlisted: {uses_value}")
+    if "run" in step["keys"]:
+        fail(f"workflow step {step['name']} must not combine uses and run")
 
 
 for env_index in top_env:
@@ -484,6 +526,7 @@ if top_jobs_index is not None:
         if gates_value.startswith("*"):
             fail("jobs.gates must not be a YAML alias")
         gates_end = block_end(gates_index, 2, SCALAR_LINES)
+        reject_merge_keys(gates_index, gates_end, 2, "jobs.gates")
         gate_controls = collect_direct_controls(gates_index, gates_end, 2)
         for _, key, _ in gate_controls:
             if key in {"if", "continue-on-error", "needs"}:
@@ -525,6 +568,7 @@ if top_jobs_index is not None:
             steps = parse_steps(steps_index, block_end(steps_index, 4, SCALAR_LINES))
 
         for step in steps:
+            inspect_uses_step(step)
             for env_index in step["key_indexes"].get("env", []):
                 inspect_env_block(env_index, 8, f"step {step['name']}")
             if writes_execution_proof_output(step["run_lines"]):
