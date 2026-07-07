@@ -43,6 +43,7 @@ def indent_of(line):
 
 KEY_RE = re.compile(r'^(\s*)(?:"([^"]+)"|\'([^\']+)\'|(<<)|([A-Za-z0-9_-]+))\s*:\s*(.*)$')
 STEP_ITEM_RE = re.compile(r'^(\s*)-\s*(?:(?:"([^"]+)"|\'([^\']+)\'|([A-Za-z0-9_-]+))\s*:\s*(.*))?\s*$')
+BLOCK_SCALAR_INDICATOR_RE = re.compile(r'^[|>](?:[-+]?|[1-9][-+]?|[-+][1-9])$')
 
 
 def decode_double_quoted_scalar(value):
@@ -94,7 +95,12 @@ def parse_key(line):
 
 def scalar_value(value):
     bare = value.split("#", 1)[0].strip()
-    return bare in {"|", ">", "|-", ">-", "|+", ">+"}
+    return BLOCK_SCALAR_INDICATOR_RE.match(bare) is not None
+
+
+def invalid_block_scalar_indicator(value):
+    bare = value.split("#", 1)[0].strip()
+    return bare.startswith(("|", ">")) and BLOCK_SCALAR_INDICATOR_RE.match(bare) is None
 
 
 def scalar_style(value):
@@ -158,10 +164,14 @@ def scalar_line_mask():
                 continue
             active_indent = None
         parsed = parse_key(line)
+        if parsed and invalid_block_scalar_indicator(parsed["value"]):
+            fail(f"invalid YAML block scalar indicator at line {index + 1}")
         if parsed and scalar_value(parsed["value"]):
             active_indent = parsed["indent"]
             continue
         item = STEP_ITEM_RE.match(line)
+        if item and invalid_block_scalar_indicator((item.group(5) or "").strip()):
+            fail(f"invalid YAML block scalar indicator at line {index + 1}")
         if item and scalar_value((item.group(5) or "").strip()):
             active_indent = len(item.group(1)) + 2
     return mask
@@ -266,6 +276,21 @@ def unescaped_quote_count(value):
     return count
 
 
+def single_quote_count(value):
+    count = 0
+    index = 0
+    while index < len(value):
+        if value[index] != "'":
+            index += 1
+            continue
+        if index + 1 < len(value) and value[index + 1] == "'":
+            index += 2
+            continue
+        count += 1
+        index += 1
+    return count
+
+
 def quoted_content(value, quote):
     start = value.find(quote)
     if start < 0:
@@ -288,22 +313,30 @@ def collect_inline_run_lines(run_index, run_indent, value):
     raw = value.strip()
     if not raw:
         return []
+    def continuation_parts(stop_when_closed=None):
+        parts = []
+        index = run_index + 1
+        while index < len(lines):
+            if lines[index].strip() and not SCALAR_LINES[index] and indent_of(lines[index]) <= run_indent:
+                break
+            cut = min(len(lines[index]), run_indent + 2)
+            parts.append(lines[index][cut:] if len(lines[index]) >= cut else "")
+            if stop_when_closed is not None and stop_when_closed(" ".join([raw] + parts)):
+                break
+            index += 1
+        return parts
     if raw.startswith('"'):
         parts = [raw]
         if unescaped_quote_count(raw) < 2:
-            index = run_index + 1
-            while index < len(lines):
-                if lines[index].strip() and not SCALAR_LINES[index] and indent_of(lines[index]) <= run_indent:
-                    break
-                cut = min(len(lines[index]), run_indent + 2)
-                parts.append(lines[index][cut:] if len(lines[index]) >= cut else "")
-                if unescaped_quote_count(" ".join(parts)) >= 2:
-                    break
-                index += 1
+            parts.extend(continuation_parts(lambda text: unescaped_quote_count(text) >= 2))
         return [decode_double_quoted_scalar(quoted_content(" ".join(part.strip() for part in parts), '"'))]
     if raw.startswith("'"):
-        return [quoted_content(raw, "'").replace("''", "'")]
-    return [strip_quotes(raw)]
+        parts = [raw]
+        if single_quote_count(raw) < 2:
+            parts.extend(continuation_parts(lambda text: single_quote_count(text) >= 2))
+        return [quoted_content(" ".join(part.strip() for part in parts), "'").replace("''", "'")]
+    parts = [raw] + continuation_parts()
+    return [strip_quotes(" ".join(part.strip() for part in parts))]
 
 
 def parse_steps(steps_index, steps_end):

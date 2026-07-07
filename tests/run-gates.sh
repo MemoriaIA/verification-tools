@@ -255,6 +255,8 @@ ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|mutant-job-
 ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|baseline-anonymous-env-first|baseline-escaped-x-key|baseline-inline-anonymous-run|mutant-anonymous-env-first-bashenv|mutant-escaped-x-bashenv-key|mutant-escaped-x-github-env-key|mutant-escaped-x-github-path-key|mutant-escaped-x-pythonpath-key|mutant-flow-run-github-env-bashenv|mutant-flow-uses-upload-artifact|mutant-inline-anonymous-run-github-env-bashenv|mutant-inline-anonymous-run-github-output-proof|mutant-prestep-if-eval-github-env-bashenv|mutant-prestep-if-eval-github-output-proof|mutant-prestep-if-eval-github-path-poison|mutant-prestep-while-eval-github-env-bashenv|mutant-sentinel-proof-backslash-builtin-nameref-overwrite|mutant-sentinel-proof-backslash-command-nameref-overwrite|mutant-sentinel-proof-backslash-declare-nameref-overwrite|mutant-sentinel-proof-chained-backslash-declare-nameref-overwrite}"
 ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|baseline-inline-run-decoded-safe|baseline-inline-run-quoted-continuation-safe|mutant-anchored-flow-run-github-env-bashenv|mutant-anchored-flow-uses-upload-artifact|mutant-inline-run-escaped-env-github-env|mutant-inline-run-escaped-github-output-proof|mutant-inline-run-quoted-continuation-github-env|mutant-inline-run-quoted-continuation-github-output-proof|mutant-prestep-chained-escaped-eval-github-output-proof|mutant-prestep-if-escaped-eval-github-env-bashenv|mutant-prestep-while-escaped-eval-github-env-bashenv|mutant-sentinel-proof-builtin-command-nameref-overwrite|mutant-sentinel-proof-builtin-escaped-option-nameref-overwrite|mutant-sentinel-proof-chained-plain-wrapper-nameref-overwrite|mutant-sentinel-proof-chained-wrapper-nameref-overwrite|mutant-sentinel-proof-escaped-declare-option-nameref-overwrite|mutant-sentinel-proof-escaped-option-nameref-overwrite}"
 ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|mutant-alias-step-run-bash-c-github-env|mutant-anchored-block-run-bash-c-github-env|mutant-inline-run-scalar-alias-bash-c-github-env|mutant-inline-run-scalar-anchor-bash-c-github-env|mutant-prestep-ansi-quoted-eval-base64-github-env|mutant-prestep-bash-c-base64-github-env|mutant-prestep-dynamic-eval-base64-github-env|mutant-prestep-python-computed-github-env-bashenv|mutant-prestep-python-computed-github-path|mutant-prestep-quoted-eval-base64-github-env|mutant-sentinel-proof-variable-option-nameref-overwrite}"
+ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|baseline-run-folded2-safe|baseline-run-pipe2-safe|mutant-prestep-run-folded2-line2-github-env|mutant-prestep-run-folded9-chomp-github-output-proof|mutant-prestep-run-folded9-line2-github-output-proof|mutant-prestep-run-pipe2-chomp-github-env|mutant-prestep-run-pipe2-line2-bashenv|mutant-prestep-run-pipe2-line2-github-env|mutant-prestep-run-pipe-chomp2-github-env|mutant-prestep-run-pipe9-line2-github-output-proof}"
+ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|mutant-inline-anonymous-run-pipe2-chomp-github-env|mutant-inline-run-plain-continuation-github-env-bashenv|mutant-inline-run-plain-continuation-github-output-proof|mutant-inline-run-single-quoted-continuation-github-env-bashenv|mutant-inline-run-single-quoted-continuation-github-output-proof}"
 TRACKED_FILES="$WORK/tracked-files.txt"
 if ! git ls-files >"$TRACKED_FILES"; then
   fail "G-18 tracked file scan completed" "git ls-files failed"
@@ -304,6 +306,8 @@ baseline-inline-anonymous-run.yml
 baseline-inline-run-decoded-safe.yml
 baseline-inline-run-quoted-continuation-safe.yml
 baseline-quoted-env-key.yml
+baseline-run-folded2-safe.yml
+baseline-run-pipe2-safe.yml
 baseline-unrelated-github-output.yml
 baseline-windows-github-path-single-quote.yml
 "
@@ -353,6 +357,19 @@ mutant-prestep-if-eval-github-path-poison.yml
 mutant-prestep-chained-escaped-eval-github-output-proof.yml
 mutant-prestep-if-escaped-eval-github-env-bashenv.yml
 mutant-prestep-quoted-eval-base64-github-env.yml
+mutant-prestep-run-folded2-line2-github-env.yml
+mutant-prestep-run-folded9-chomp-github-output-proof.yml
+mutant-prestep-run-folded9-line2-github-output-proof.yml
+mutant-prestep-run-pipe2-chomp-github-env.yml
+mutant-prestep-run-pipe2-line2-bashenv.yml
+mutant-prestep-run-pipe2-line2-github-env.yml
+mutant-prestep-run-pipe-chomp2-github-env.yml
+mutant-prestep-run-pipe9-line2-github-output-proof.yml
+mutant-inline-anonymous-run-pipe2-chomp-github-env.yml
+mutant-inline-run-plain-continuation-github-env-bashenv.yml
+mutant-inline-run-plain-continuation-github-output-proof.yml
+mutant-inline-run-single-quoted-continuation-github-env-bashenv.yml
+mutant-inline-run-single-quoted-continuation-github-output-proof.yml
 mutant-prestep-while-escaped-eval-github-env-bashenv.yml
 mutant-prestep-while-eval-github-env-bashenv.yml
 mutant-prestep-github-path-chocolatey-poison.yml
