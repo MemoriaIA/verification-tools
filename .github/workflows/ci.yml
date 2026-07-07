@@ -5,7 +5,6 @@ on:
     branches:
       - main
   pull_request:
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -74,14 +73,36 @@ jobs:
           VT_G19_PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
           VT_G19_CHECKOUT_SHA: ${{ github.sha }}
         run: |
+          ROOT_WORKSPACE="$PWD"
+          MATERIALIZED_WORKTREE="$(mktemp -d)"
+          cleanup_materialized_worktree() {
+            cd "$ROOT_WORKSPACE"
+            git worktree remove --force "$MATERIALIZED_WORKTREE" >/dev/null 2>&1 || rm -rf "$MATERIALIZED_WORKTREE"
+          }
+          trap cleanup_materialized_worktree EXIT
+          git worktree add --detach "$MATERIALIZED_WORKTREE" "$VT_G19_CHECKOUT_SHA"
+          cd "$MATERIALIZED_WORKTREE"
+          source tests/lib/verify-tracked-workspace.sh
+          verify_tracked_workspace_file .github/workflows/ci.yml
+          verify_tracked_workspace_file tests/lib/verify-tracked-workspace.sh
+          verify_tracked_workspace_file tests/run-gates.sh
+          verify_tracked_workspace_file tests/g19-v2-structural-check.sh
+          verify_tracked_workspace_file memoriaia/verify/verify-hashchain.py
+          verify_tracked_workspace_file verify/verify-hashchain.sh
+          git ls-files 'tests/fixtures/g19-v2/*.yml' | while IFS= read -r fixture; do
+            verify_tracked_workspace_file "$fixture"
+          done
           bash tests/run-gates.sh
 
       - name: G-19 CI anti-theater (run-gates execution proof required)
         if: always()
         env:
-          VT_G19_EXPECTED_RUN_GATES_SHA: "0ce0a4b651ceeec56bf31851b5aeec132e67581c0e37bef0ce80ab9036867b8b"
-          VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA: "4cc1b80762446839660c1e7f4938a7c0c2aadbaaccde12961a4149ae44a164ce"
-          VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA: "2f69f91b5b57c8b93c214dc8711d89c38ec9ae7f4e72e1dba96b84e69b8dad36"
+          VT_G19_EXPECTED_RUN_GATES_SHA: "7dd87f48c59695a0985fcebcb916122c83150e44148592f81233892dd78804f1"
+          VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA: "6740f24dac40e74efddb424fe506b16409e4404d470231a0f1c22fdd57d4706d"
+          VT_G19_EXPECTED_WORKSPACE_HELPER_SHA: "ecc05ac6690df69f5d1db7986bea397368fef247f2145c5965401d7b97384e31"
+          VT_G19_EXPECTED_VERIFY_PY_SHA: "abedd126eac0227dddad9267d8863d1b3b4921ef0bdc69301f59b9c9d708683b"
+          VT_G19_EXPECTED_VERIFY_SH_SHA: "65694b5e0abe95f3322c45ab7c69b597d83121ec14001bdbba8e6e83f2224192"
+          VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA: "82ab4918f9032d76ff0464e0fa5d75309374ef36c64765458354586f1598ea0a"
           VT_G19_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           VT_G19_PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
           VT_G19_CHECKOUT_SHA: ${{ github.sha }}
@@ -107,17 +128,33 @@ jobs:
             echo "G-19 FAIL: checkout SHA mismatch (expected $VT_G19_CHECKOUT_SHA, got $CHECKOUT_SHA)"
             exit 1
           fi
-          RUN_GATES_SHA="$(git cat-file blob "HEAD:tests/run-gates.sh" | sha256sum | awk '{print $1}')"
+          RUN_GATES_SHA="$(git cat-file blob "$CHECKOUT_SHA:tests/run-gates.sh" | sha256sum | awk '{print $1}')"
           if [ "$RUN_GATES_SHA" != "$VT_G19_EXPECTED_RUN_GATES_SHA" ]; then
             echo "G-19 FAIL: tests/run-gates.sh hash mismatch ($RUN_GATES_SHA)"
             exit 1
           fi
-          STRUCTURAL_CHECK_SHA="$(git cat-file blob "HEAD:tests/g19-v2-structural-check.sh" | sha256sum | awk '{print $1}')"
+          STRUCTURAL_CHECK_SHA="$(git cat-file blob "$CHECKOUT_SHA:tests/g19-v2-structural-check.sh" | sha256sum | awk '{print $1}')"
           if [ "$STRUCTURAL_CHECK_SHA" != "$VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA" ]; then
             echo "G-19 FAIL: tests/g19-v2-structural-check.sh hash mismatch ($STRUCTURAL_CHECK_SHA)"
             exit 1
           fi
-          FIXTURE_MANIFEST_SHA="$(git ls-files 'tests/fixtures/g19-v2/*.yml' | while IFS= read -r fixture; do fixture_sha="$(git cat-file blob "HEAD:$fixture" | sha256sum | awk '{print $1}')"; printf '%s  %s\n' "$fixture_sha" "$fixture"; done | sha256sum | awk '{print $1}')"
+          WORKSPACE_HELPER_SHA="$(git cat-file blob "$CHECKOUT_SHA:tests/lib/verify-tracked-workspace.sh" | sha256sum | awk '{print $1}')"
+          if [ "$WORKSPACE_HELPER_SHA" != "$VT_G19_EXPECTED_WORKSPACE_HELPER_SHA" ]; then
+            echo "G-19 FAIL: tests/lib/verify-tracked-workspace.sh hash mismatch ($WORKSPACE_HELPER_SHA)"
+            exit 1
+          fi
+          CI_YML_SHA="$(git cat-file blob "$CHECKOUT_SHA:.github/workflows/ci.yml" | sha256sum | awk '{print $1}')"
+          VERIFY_PY_SHA="$(git cat-file blob "$CHECKOUT_SHA:memoriaia/verify/verify-hashchain.py" | sha256sum | awk '{print $1}')"
+          if [ "$VERIFY_PY_SHA" != "$VT_G19_EXPECTED_VERIFY_PY_SHA" ]; then
+            echo "G-19 FAIL: memoriaia/verify/verify-hashchain.py hash mismatch ($VERIFY_PY_SHA)"
+            exit 1
+          fi
+          VERIFY_SH_SHA="$(git cat-file blob "$CHECKOUT_SHA:verify/verify-hashchain.sh" | sha256sum | awk '{print $1}')"
+          if [ "$VERIFY_SH_SHA" != "$VT_G19_EXPECTED_VERIFY_SH_SHA" ]; then
+            echo "G-19 FAIL: verify/verify-hashchain.sh hash mismatch ($VERIFY_SH_SHA)"
+            exit 1
+          fi
+          FIXTURE_MANIFEST_SHA="$(git ls-files 'tests/fixtures/g19-v2/*.yml' | while IFS= read -r fixture; do fixture_sha="$(git cat-file blob "$CHECKOUT_SHA:$fixture" | sha256sum | awk '{print $1}')"; printf '%s  %s\n' "$fixture_sha" "$fixture"; done | sha256sum | awk '{print $1}')"
           if [ "$FIXTURE_MANIFEST_SHA" != "$VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA" ]; then
             echo "G-19 FAIL: G-19 fixture manifest hash mismatch ($FIXTURE_MANIFEST_SHA)"
             exit 1
@@ -131,7 +168,7 @@ jobs:
             echo "G-19 FAIL: VT_G19_EXEC_PROOF is invalid ($PROOF)"
             exit 1
           fi
-          EXPECTED_PROOF="$(printf 'VT_G19_EXECUTED:v2\nPR_HEAD:%s\nPR_BASE:%s\nCHECKOUT:%s\nRUN_GATES:%s\nSTRUCTURAL:%s\nFIXTURES:%s\n' "$VT_G19_PR_HEAD_SHA" "$VT_G19_PR_BASE_SHA" "$CHECKOUT_SHA" "$RUN_GATES_SHA" "$STRUCTURAL_CHECK_SHA" "$FIXTURE_MANIFEST_SHA" | sha256sum | awk '{print $1}')"
+          EXPECTED_PROOF="$(printf 'VT_G19_EXECUTED:v4\nPR_HEAD:%s\nPR_BASE:%s\nCHECKOUT:%s\nCI_YML:%s\nRUN_GATES:%s\nSTRUCTURAL:%s\nWORKSPACE_HELPER:%s\nVERIFY_PY:%s\nVERIFY_SH:%s\nFIXTURES:%s\n' "$VT_G19_PR_HEAD_SHA" "$VT_G19_PR_BASE_SHA" "$CHECKOUT_SHA" "$CI_YML_SHA" "$RUN_GATES_SHA" "$STRUCTURAL_CHECK_SHA" "$WORKSPACE_HELPER_SHA" "$VERIFY_PY_SHA" "$VERIFY_SH_SHA" "$FIXTURE_MANIFEST_SHA" | sha256sum | awk '{print $1}')"
           if [ "$PROOF" != "$EXPECTED_PROOF" ]; then
             echo "G-19 FAIL: VT_G19_EXEC_PROOF preimage mismatch (expected $EXPECTED_PROOF, got $PROOF)"
             exit 1
