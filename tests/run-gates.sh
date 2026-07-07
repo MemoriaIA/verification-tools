@@ -886,7 +886,7 @@ if (
   cd "$WHITESPACE_REPO" &&
   WS_BASE_SHA="$(git rev-parse HEAD~1)" &&
   WS_HEAD_SHA="$(git rev-parse HEAD)" &&
-  git diff --check "$WS_BASE_SHA..$WS_HEAD_SHA" >"$WHITESPACE_OUT" 2>&1
+  git -c core.attributesFile=/dev/null diff --check "$WS_BASE_SHA..$WS_HEAD_SHA" >"$WHITESPACE_OUT" 2>&1
 ); then
   fail "G-21 range-aware whitespace guard rejects committed whitespace" "range-aware diff unexpectedly passed"
 else
@@ -913,11 +913,75 @@ if (
   git add clean.txt &&
   git commit -q -m "head-clean" &&
   WS_HEAD_SHA="$(git rev-parse HEAD)" &&
-  git diff --check "$WS_BASE_SHA..$WS_HEAD_SHA" >"$WHITESPACE_OUT" 2>&1
+  git -c core.attributesFile=/dev/null diff --check "$WS_BASE_SHA..$WS_HEAD_SHA" >"$WHITESPACE_OUT" 2>&1
 ); then
   pass "G-23 range-aware whitespace guard passes clean committed range"
 else
   fail "G-23 range-aware whitespace guard passes clean committed range" "$(tr '\n' ';' <"$WHITESPACE_OUT")"
+fi
+
+WHITESPACE_PR_REPO="$WORK/whitespace-pr-merge-base-repo"
+mkdir -p "$WHITESPACE_PR_REPO"
+if (
+  cd "$WHITESPACE_PR_REPO" &&
+  git init -q &&
+  git config user.name "verification-tools-gates" &&
+  git config user.email "verification-tools@example.invalid" &&
+  git config core.autocrlf false &&
+  printf 'legacy   \n' > inherited.txt &&
+  git add inherited.txt &&
+  git commit -q -m "branch-point-with-legacy-whitespace" &&
+  git branch feature &&
+  printf 'legacy\n' > inherited.txt &&
+  git add inherited.txt &&
+  git commit -q -m "main-cleans-legacy-whitespace" &&
+  WS_BASE_SHA="$(git rev-parse HEAD)" &&
+  printf '%s' "$WS_BASE_SHA" > .ws-base-sha &&
+  git checkout -q feature &&
+  printf 'feature\n' > feature.txt &&
+  git add feature.txt &&
+  git commit -q -m "feature-does-not-touch-legacy-whitespace" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  git -c core.attributesFile=/dev/null diff --check "$WS_BASE_SHA..$WS_HEAD_SHA" >"$WHITESPACE_OUT" 2>&1
+); then
+  fail "G-24 two-dot whitespace diff false-positives after base cleanup" "two-dot diff unexpectedly passed"
+else
+  pass "G-24 two-dot whitespace diff false-positives after base cleanup"
+fi
+
+if (
+  cd "$WHITESPACE_PR_REPO" &&
+  WS_BASE_SHA="$(cat .ws-base-sha)" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  git -c core.attributesFile=/dev/null diff --check "$WS_BASE_SHA...$WS_HEAD_SHA" >"$WHITESPACE_OUT" 2>&1
+); then
+  pass "G-25 triple-dot whitespace diff uses merge base for pull requests"
+else
+  fail "G-25 triple-dot whitespace diff uses merge base for pull requests" "$(tr '\n' ';' <"$WHITESPACE_OUT")"
+fi
+
+WHITESPACE_ATTR_REPO="$WORK/whitespace-attributes-repo"
+mkdir -p "$WHITESPACE_ATTR_REPO"
+if (
+  cd "$WHITESPACE_ATTR_REPO" &&
+  git init -q &&
+  git config user.name "verification-tools-gates" &&
+  git config user.email "verification-tools@example.invalid" &&
+  git config core.autocrlf false &&
+  printf 'clean\n' > tracked.txt &&
+  git add tracked.txt &&
+  git commit -q -m "base-clean" &&
+  WS_BASE_SHA="$(git rev-parse HEAD)" &&
+  printf '* -whitespace\n' > .gitattributes &&
+  printf 'dirty   \n' > tracked.txt &&
+  git add .gitattributes tracked.txt &&
+  git commit -q -m "head-relaxes-whitespace-attributes" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  git diff --name-only "$WS_BASE_SHA..$WS_HEAD_SHA" | grep -qE '(^|/)\.gitattributes$'
+); then
+  pass "G-26 whitespace guard rejects checked-range .gitattributes changes"
+else
+  fail "G-26 whitespace guard rejects checked-range .gitattributes changes" ".gitattributes change was not detected in the checked range"
 fi
 
 echo

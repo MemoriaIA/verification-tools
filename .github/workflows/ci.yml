@@ -68,6 +68,7 @@ jobs:
         env:
           VT_WS_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
           VT_WS_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          VT_WS_EVENT_NAME: ${{ github.event_name }}
         run: |
           if ! printf '%s\n' "$VT_WS_BASE_SHA" | grep -qE '^[0-9a-f]{40}$'; then
             echo "WHITESPACE FAIL: base SHA is invalid ($VT_WS_BASE_SHA)"
@@ -85,9 +86,17 @@ jobs:
             echo "WHITESPACE FAIL: head commit is unavailable ($VT_WS_HEAD_SHA)"
             exit 1
           fi
-          WHITESPACE_RANGE="$VT_WS_BASE_SHA..$VT_WS_HEAD_SHA"
+          if [ "$VT_WS_EVENT_NAME" = "pull_request" ] || [ "$VT_WS_EVENT_NAME" = "pull_request_target" ]; then
+            WHITESPACE_RANGE="$VT_WS_BASE_SHA...$VT_WS_HEAD_SHA"
+          else
+            WHITESPACE_RANGE="$VT_WS_BASE_SHA..$VT_WS_HEAD_SHA"
+          fi
           echo "WHITESPACE RANGE: $WHITESPACE_RANGE"
-          git diff --check "$WHITESPACE_RANGE"
+          if git diff --name-only "$WHITESPACE_RANGE" | grep -qE '(^|/)\.gitattributes$'; then
+            echo "WHITESPACE FAIL: .gitattributes changed in checked range ($WHITESPACE_RANGE)"
+            exit 1
+          fi
+          git -c core.attributesFile=/dev/null diff --check "$WHITESPACE_RANGE"
 
       - name: Run verification gate suite
         id: run_gates

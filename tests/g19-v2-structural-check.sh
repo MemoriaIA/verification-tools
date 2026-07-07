@@ -1069,9 +1069,17 @@ if top_jobs_index is not None:
                     'echo "WHITESPACE FAIL: head commit is unavailable ($VT_WS_HEAD_SHA)"',
                     "exit 1",
                     "fi",
+                    'if [ "$VT_WS_EVENT_NAME" = "pull_request" ] || [ "$VT_WS_EVENT_NAME" = "pull_request_target" ]; then',
+                    'WHITESPACE_RANGE="$VT_WS_BASE_SHA...$VT_WS_HEAD_SHA"',
+                    "else",
                     'WHITESPACE_RANGE="$VT_WS_BASE_SHA..$VT_WS_HEAD_SHA"',
+                    "fi",
                     'echo "WHITESPACE RANGE: $WHITESPACE_RANGE"',
-                    'git diff --check "$WHITESPACE_RANGE"',
+                    'if git diff --name-only "$WHITESPACE_RANGE" | grep -qE \'(^|/)\\.gitattributes$\'; then',
+                    'echo "WHITESPACE FAIL: .gitattributes changed in checked range ($WHITESPACE_RANGE)"',
+                    "exit 1",
+                    "fi",
+                    'git -c core.attributesFile=/dev/null diff --check "$WHITESPACE_RANGE"',
                 ]
                 if whitespace_exec != expected_whitespace_exec:
                     fail("whitespace guard must match the exact range-aware command sequence")
@@ -1079,6 +1087,8 @@ if top_jobs_index is not None:
                     fail("whitespace guard env must define VT_WS_BASE_SHA from GitHub event context")
                 if whitespace_env.get("VT_WS_HEAD_SHA") != "${{ github.event.pull_request.head.sha || github.sha }}":
                     fail("whitespace guard env must define VT_WS_HEAD_SHA from GitHub event context")
+                if whitespace_env.get("VT_WS_EVENT_NAME") != "${{ github.event_name }}":
+                    fail("whitespace guard env must define VT_WS_EVENT_NAME from GitHub event context")
 
         if len(gate_steps) == 1:
             gate = gate_steps[0]
