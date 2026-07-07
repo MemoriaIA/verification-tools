@@ -256,7 +256,7 @@ ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|mutant-alia
 ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|baseline-run-folded2-safe|baseline-run-pipe2-safe|mutant-prestep-run-folded2-line2-github-env|mutant-prestep-run-folded9-chomp-github-output-proof|mutant-prestep-run-folded9-line2-github-output-proof|mutant-prestep-run-pipe2-chomp-github-env|mutant-prestep-run-pipe2-line2-bashenv|mutant-prestep-run-pipe2-line2-github-env|mutant-prestep-run-pipe-chomp2-github-env|mutant-prestep-run-pipe9-line2-github-output-proof}"
 ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|mutant-prestep-list-item-merge-poison-run|mutant-prestep-list-item-merge-poison-env|mutant-prestep-list-item-merge-poison-uses|mutant-prestep-block-ansi-u005f-env|mutant-prestep-block-ansi-x5f-env|mutant-prestep-block-ansi-u005f-output-proof|mutant-prestep-block-ansi-u005f-path|mutant-sentinel-declare-hex-n-nameref|mutant-sentinel-local-hex-n-nameref|mutant-sentinel-typeset-hex-n-nameref|mutant-sentinel-declare-ansi-n-nameref|mutant-prestep-usrbin-bash-c-github-env|mutant-prestep-env-i-bash-c-github-output-proof|mutant-prestep-sh-c-github-env|mutant-prestep-tab-indented-block-github-env}"
 ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|mutant-inline-anonymous-run-pipe2-chomp-github-env|mutant-inline-run-plain-continuation-github-env-bashenv|mutant-inline-run-plain-continuation-github-output-proof|mutant-inline-run-single-quoted-continuation-github-env-bashenv|mutant-inline-run-single-quoted-continuation-github-output-proof}"
-ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|baseline-no-working-directory-safe|mutant-prestep-shadow-run-gates-stub|mutant-prestep-shadow-structural-checker-stub|mutant-prestep-shadow-verifier-stub|mutant-step-working-directory-shadow-tree|mutant-job-working-directory-shadow-tree|mutant-prestep-block-ansi-octal-137-env|mutant-prestep-block-ansi-octal-137-output-proof|mutant-prestep-block-ansi-octal-137-path|mutant-prestep-block-ansi-octal-bashenv|mutant-prestep-source-github-env|mutant-prestep-dot-github-env|mutant-inline-run-single-quoted-doubled-quote-github-env|mutant-sentinel-proof-variable-option-plain-nameref-overwrite|mutant-prestep-command-substitution-bash-c-github-env|mutant-prestep-bash-ec-github-env|mutant-prestep-process-substitution-bash-github-env|mutant-prestep-git-checkout-head-drift|mutant-gate-post-verify-run-gates-rewrite|mutant-gate-missing-ci-yml-verify|mutant-gate-missing-helper-source|mutant-sentinel-extra-command|mutant-sentinel-v3-proof-preimage|mutant-workflow-dispatch-enabled|mutant-workflow-dispatch-flow-sequence|mutant-prestep-command-git-checkout-head-drift|mutant-sentinel-printf-redirect-side-effect|mutant-prestep-truncate-run-gates|mutant-gate-inline-git-checkout-before-run|mutant-sentinel-expected-proof-overwrite}"
+ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|baseline-no-working-directory-safe|mutant-prestep-shadow-run-gates-stub|mutant-prestep-shadow-structural-checker-stub|mutant-prestep-shadow-verifier-stub|mutant-step-working-directory-shadow-tree|mutant-job-working-directory-shadow-tree|mutant-prestep-block-ansi-octal-137-env|mutant-prestep-block-ansi-octal-137-output-proof|mutant-prestep-block-ansi-octal-137-path|mutant-prestep-block-ansi-octal-bashenv|mutant-prestep-source-github-env|mutant-prestep-dot-github-env|mutant-inline-run-single-quoted-doubled-quote-github-env|mutant-sentinel-proof-variable-option-plain-nameref-overwrite|mutant-prestep-command-substitution-bash-c-github-env|mutant-prestep-bash-ec-github-env|mutant-prestep-process-substitution-bash-github-env|mutant-prestep-git-checkout-head-drift|mutant-gate-post-verify-run-gates-rewrite|mutant-gate-missing-ci-yml-verify|mutant-gate-missing-helper-source|mutant-sentinel-extra-command|mutant-sentinel-v3-proof-preimage|mutant-workflow-dispatch-enabled|mutant-workflow-dispatch-flow-sequence|mutant-prestep-command-git-checkout-head-drift|mutant-sentinel-printf-redirect-side-effect|mutant-prestep-truncate-run-gates|mutant-gate-inline-git-checkout-before-run|mutant-prestep-env-git-checkout-head-drift|mutant-prestep-usrbin-git-checkout-head-drift|mutant-prestep-git-C-checkout-head-drift|mutant-prestep-tee-run-gates|mutant-prestep-colon-redir-run-gates|mutant-sentinel-exec-printf-side-effect|mutant-sentinel-builtin-printf-side-effect|mutant-sentinel-expected-proof-overwrite}"
 TRACKED_FILES="$WORK/tracked-files.txt"
 if ! git ls-files >"$TRACKED_FILES"; then
   fail "G-18 tracked file scan completed" "git ls-files failed"
@@ -433,6 +433,13 @@ mutant-prestep-command-git-checkout-head-drift.yml
 mutant-sentinel-printf-redirect-side-effect.yml
 mutant-prestep-truncate-run-gates.yml
 mutant-gate-inline-git-checkout-before-run.yml
+mutant-prestep-env-git-checkout-head-drift.yml
+mutant-prestep-usrbin-git-checkout-head-drift.yml
+mutant-prestep-git-C-checkout-head-drift.yml
+mutant-prestep-tee-run-gates.yml
+mutant-prestep-colon-redir-run-gates.yml
+mutant-sentinel-exec-printf-side-effect.yml
+mutant-sentinel-builtin-printf-side-effect.yml
 mutant-sentinel-expected-proof-overwrite.yml
 mutant-sentinel-proof-variable-option-plain-nameref-overwrite.yml
 mutant-step-working-directory-shadow-tree.yml
@@ -604,16 +611,21 @@ if [ "$FAILED" -eq 0 ]; then
       exit 2
     fi
   done
-  EXECUTED_HEAD_SHA="$(git rev-parse HEAD)"
+  GIT_BIN="$(command -v git)"
+  if [ -z "$GIT_BIN" ] || [ ! -x "$GIT_BIN" ]; then
+    echo "SETUP FAIL: git executable is unavailable for proof binding"
+    exit 2
+  fi
+  EXECUTED_HEAD_SHA="$("$GIT_BIN" rev-parse HEAD)"
   if [ "$PROOF_CHECKOUT_SHA" != "$EXECUTED_HEAD_SHA" ]; then
     echo "SETUP FAIL: VT_G19_CHECKOUT_SHA does not match executed worktree HEAD ($EXECUTED_HEAD_SHA)"
     exit 2
   fi
   tracked_blob_sha256() {
-    git cat-file blob "$PROOF_CHECKOUT_SHA:$1" | sha256sum | awk '{print $1}'
+    "$GIT_BIN" cat-file blob "$PROOF_CHECKOUT_SHA:$1" | sha256sum | awk '{print $1}'
   }
   fixture_manifest_sha256() {
-    git ls-files 'tests/fixtures/g19-v2/*.yml' |
+    "$GIT_BIN" ls-files 'tests/fixtures/g19-v2/*.yml' |
       while IFS= read -r fixture; do
         printf '%s  %s\n' "$(tracked_blob_sha256 "$fixture")" "$fixture"
       done |

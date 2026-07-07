@@ -800,12 +800,17 @@ def forbidden_environment_mutation(step):
         )
         for protected_path in protected_paths:
             if protected_path in raw_code or protected_path in code:
-                if re.search(r'(^|[;&|]\s*)(cp|mv|install|truncate|dd)\b', code):
+                if re.search(r'(^|[;&|]\s*)(cp|mv|install|truncate|dd|tee)\b', code):
                     return "tracked gate file"
-                if re.search(r'(^|[;&|]\s*)(cat|printf|echo|tee|python[0-9.]*|node|perl|ruby|sed)\b', code) and re.search(r'(>>?|--in-place|-i\b)', code):
+                if re.search(r'(^|[;&|]\s*)(cat|printf|echo|python[0-9.]*|node|perl|ruby|sed)\b', code) and re.search(r'(>>?|--in-place|-i\b)', code):
+                    return "tracked gate file"
+                if re.search(r'(^|[;&|]\s*):?\s*>{1,2}', raw_code):
                     return "tracked gate file"
         if step["name"] not in {GATE_STEP_NAME, SENTINEL_STEP_NAME}:
-            if re.search(r'(^|[;&|]\s*)(?:(?:command|builtin)\s+)?git\s+(checkout|switch|reset|clean|restore|update-ref|worktree|clone|fetch|pull|merge|rebase|submodule|apply|am|commit|add|rm|mv)\b', code):
+            if re.search(
+                r'(^|[;&|]\s*)(?:(?:env|command|builtin)\s+)*(?:/usr/bin/|/bin/)?git(?:\s+-C\s+\S+)*\s+(checkout|switch|reset|clean|restore|update-ref|worktree|clone|fetch|pull|merge|rebase|submodule|apply|am|commit|add|rm|mv)\b',
+                code,
+            ):
                 return "git checkout state"
             if "$(" in raw_code or "`" in raw_code:
                 return "computed environment file"
@@ -1076,7 +1081,10 @@ if top_jobs_index is not None:
             if any(line in {"true", ":", "exit 0"} for line in sentinel_exec):
                 fail("sentinel contains inert success command")
             if not strict_workflow_proof and any(
-                re.search(r'(^|[;&|]\s*)(touch|cp|mv|rm|printf|echo|python[0-9.]*|node|perl|ruby|sed|cat|tee|bash|sh|git)\b', line)
+                re.search(
+                    r'(^|[;&|]\s*)(?:(?:exec|builtin|command)\s+)*(?:/usr/bin/|/bin/)?(touch|cp|mv|rm|printf|echo|python[0-9.]*|node|perl|ruby|sed|cat|tee|bash|sh|git)\b',
+                    line,
+                )
                 for line in sentinel_exec
             ):
                 fail("sentinel contains side-effecting command outside the proof contract")
