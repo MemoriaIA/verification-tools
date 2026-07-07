@@ -537,9 +537,13 @@ if [ "$FAILED" -eq 0 ]; then
   HEAD_SHA="$(git rev-parse HEAD 2>/dev/null || printf 'unknown')"
   RUN_GATES_SHA="$(sha256sum tests/run-gates.sh | awk '{print $1}')"
   STRUCTURAL_CHECK_SHA="$(sha256sum tests/g19-v2-structural-check.sh | awk '{print $1}')"
-  G19_PROOF_MATERIAL="${G19_PROOF_MATERIAL}SCRIPT|tests/run-gates.sh|${RUN_GATES_SHA}"$'\n'
-  G19_PROOF_MATERIAL="${G19_PROOF_MATERIAL}SCRIPT|tests/g19-v2-structural-check.sh|${STRUCTURAL_CHECK_SHA}"$'\n'
-  VT_G19_EXEC_PROOF="$(printf 'VT_G19_EXECUTED:%s\n%s' "$HEAD_SHA" "$G19_PROOF_MATERIAL" | sha256sum | awk '{print $1}')"
+  G19_FIXTURE_MANIFEST_SHA="$(git ls-files -z 'tests/fixtures/g19-v2/*.yml' | xargs -0 sha256sum | sha256sum | awk '{print $1}')"
+  VT_G19_EXEC_PROOF="$(
+    printf 'VT_G19_EXECUTED:%s\nRUN_GATES:%s\nSTRUCTURAL:%s\nFIXTURES:%s\n' \
+      "$HEAD_SHA" "$RUN_GATES_SHA" "$STRUCTURAL_CHECK_SHA" "$G19_FIXTURE_MANIFEST_SHA" |
+      sha256sum |
+      awk '{print $1}'
+  )"
   echo "VT_G19_EXEC_PROOF=$VT_G19_EXEC_PROOF"
   [ -n "${GITHUB_OUTPUT:-}" ] && echo "vt_g19_exec_proof=$VT_G19_EXEC_PROOF" >> "$GITHUB_OUTPUT"
   exit 0

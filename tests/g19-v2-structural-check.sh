@@ -24,6 +24,8 @@ import re
 import sys
 
 path = sys.argv[1]
+workflow_path = path.replace("\\", "/")
+strict_workflow_proof = workflow_path.endswith(".github/workflows/ci.yml")
 with open(path, "r", encoding="utf-8") as handle:
     lines = handle.read().splitlines()
 
@@ -660,6 +662,19 @@ def inspect_env_block(env_index, env_indent, context):
             fail(f"{context}.env must not define Bash function export key {env_key}")
 
 
+def step_env_values(step):
+    values = {}
+    for env_index in step["key_indexes"].get("env", []):
+        env_end = block_end(env_index, 8, SCALAR_LINES)
+        for index in range(env_index + 1, env_end):
+            if SCALAR_LINES[index]:
+                continue
+            parsed = parse_key(lines[index])
+            if parsed and parsed["indent"] == 10:
+                values[parsed["key"]] = strip_quotes(parsed["value"])
+    return values
+
+
 def writes_execution_proof_output(run_lines):
     code_lines = [normalize_shell_words(line.split("#", 1)[0]) for line in executable_lines(run_lines)]
     joined = "\n".join(code_lines)
@@ -931,9 +946,28 @@ if top_jobs_index is not None:
             outcome_pattern = re.compile(r'^if \[ "\$\{\{\s*steps\.run_gates\.outcome\s*\}\}" != "success" \]; then$')
             missing_pattern = re.compile(r'^if \[ -z "\$PROOF" \]; then$')
             invalid_pattern = re.compile(r"^if ! printf '%s\\n' \"\$PROOF\" \| grep -qE '\^\[0-9a-f\]\{64\}\$'; then$")
+            run_gates_hash_pattern = re.compile(r'^if \[ "\$RUN_GATES_SHA" != "\$VT_G19_EXPECTED_RUN_GATES_SHA" \]; then$')
+            structural_hash_pattern = re.compile(r'^if \[ "\$STRUCTURAL_CHECK_SHA" != "\$VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA" \]; then$')
+            fixture_hash_pattern = re.compile(r'^if \[ "\$FIXTURE_MANIFEST_SHA" != "\$VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA" \]; then$')
+            proof_preimage_pattern = re.compile(r'^if \[ "\$PROOF" != "\$EXPECTED_PROOF" \]; then$')
             require_top_level_branch(sentinel_exec, outcome_pattern, "steps.run_gates.outcome")
             require_top_level_branch(sentinel_exec, missing_pattern, "missing execution proof")
             require_top_level_branch(sentinel_exec, invalid_pattern, "invalid execution proof")
+            if strict_workflow_proof:
+                require_top_level_branch(sentinel_exec, run_gates_hash_pattern, "tests/run-gates.sh content hash")
+                require_top_level_branch(sentinel_exec, structural_hash_pattern, "tests/g19-v2-structural-check.sh content hash")
+                require_top_level_branch(sentinel_exec, fixture_hash_pattern, "G-19 fixture manifest hash")
+                require_top_level_branch(sentinel_exec, proof_preimage_pattern, "execution proof preimage")
+                sentinel_env = step_env_values(sentinel)
+                for key in (
+                    "VT_G19_EXPECTED_RUN_GATES_SHA",
+                    "VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA",
+                    "VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA",
+                ):
+                    if re.fullmatch(r'[0-9a-f]{64}', sentinel_env.get(key, "")) is None:
+                        fail(f"sentinel env must define {key} as a 64-hex hash")
+                if not any(line.startswith('EXPECTED_PROOF="$(printf ') and "VT_G19_EXECUTED:%s" in line for line in sentinel_exec):
+                    fail("sentinel must recompute expected VT_G19_EXEC_PROOF preimage")
 
 if errors:
     for error in errors:
