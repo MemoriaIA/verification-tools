@@ -908,6 +908,16 @@ if top_jobs_index is not None:
                 fail("gate run block must contain exactly one executable line: bash tests/run-gates.sh")
             if any(contains_neutralizer(line) for line in gate_exec):
                 fail("gate execution step contains gate-neutralizing pattern(s)")
+            if strict_workflow_proof:
+                gate_env = step_env_values(gate)
+                expected_event_env = {
+                    "VT_G19_PR_HEAD_SHA": "${{ github.event.pull_request.head.sha || github.sha }}",
+                    "VT_G19_PR_BASE_SHA": "${{ github.event.pull_request.base.sha || github.event.before || github.sha }}",
+                    "VT_G19_CHECKOUT_SHA": "${{ github.sha }}",
+                }
+                for key, expected_value in expected_event_env.items():
+                    if gate_env.get(key) != expected_value:
+                        fail(f"gate execution step env must define {key} from GitHub event context")
 
         if len(sentinel_steps) == 1:
             sentinel = sentinel_steps[0]
@@ -946,6 +956,10 @@ if top_jobs_index is not None:
             outcome_pattern = re.compile(r'^if \[ "\$\{\{\s*steps\.run_gates\.outcome\s*\}\}" != "success" \]; then$')
             missing_pattern = re.compile(r'^if \[ -z "\$PROOF" \]; then$')
             invalid_pattern = re.compile(r"^if ! printf '%s\\n' \"\$PROOF\" \| grep -qE '\^\[0-9a-f\]\{64\}\$'; then$")
+            pr_head_sha_pattern = re.compile(r"^if ! printf '%s\\n' \"\$VT_G19_PR_HEAD_SHA\" \| grep -qE '\^\[0-9a-f\]\{40\}\$'; then$")
+            pr_base_sha_pattern = re.compile(r"^if ! printf '%s\\n' \"\$VT_G19_PR_BASE_SHA\" \| grep -qE '\^\[0-9a-f\]\{40\}\$'; then$")
+            checkout_sha_pattern = re.compile(r"^if ! printf '%s\\n' \"\$VT_G19_CHECKOUT_SHA\" \| grep -qE '\^\[0-9a-f\]\{40\}\$'; then$")
+            checkout_match_pattern = re.compile(r'^if \[ "\$CHECKOUT_SHA" != "\$VT_G19_CHECKOUT_SHA" \]; then$')
             run_gates_hash_pattern = re.compile(r'^if \[ "\$RUN_GATES_SHA" != "\$VT_G19_EXPECTED_RUN_GATES_SHA" \]; then$')
             structural_hash_pattern = re.compile(r'^if \[ "\$STRUCTURAL_CHECK_SHA" != "\$VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA" \]; then$')
             fixture_hash_pattern = re.compile(r'^if \[ "\$FIXTURE_MANIFEST_SHA" != "\$VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA" \]; then$')
@@ -954,11 +968,23 @@ if top_jobs_index is not None:
             require_top_level_branch(sentinel_exec, missing_pattern, "missing execution proof")
             require_top_level_branch(sentinel_exec, invalid_pattern, "invalid execution proof")
             if strict_workflow_proof:
+                require_top_level_branch(sentinel_exec, pr_head_sha_pattern, "PR head SHA")
+                require_top_level_branch(sentinel_exec, pr_base_sha_pattern, "PR base SHA")
+                require_top_level_branch(sentinel_exec, checkout_sha_pattern, "checkout SHA")
+                require_top_level_branch(sentinel_exec, checkout_match_pattern, "checked-out SHA")
                 require_top_level_branch(sentinel_exec, run_gates_hash_pattern, "tests/run-gates.sh content hash")
                 require_top_level_branch(sentinel_exec, structural_hash_pattern, "tests/g19-v2-structural-check.sh content hash")
                 require_top_level_branch(sentinel_exec, fixture_hash_pattern, "G-19 fixture manifest hash")
                 require_top_level_branch(sentinel_exec, proof_preimage_pattern, "execution proof preimage")
                 sentinel_env = step_env_values(sentinel)
+                expected_event_env = {
+                    "VT_G19_PR_HEAD_SHA": "${{ github.event.pull_request.head.sha || github.sha }}",
+                    "VT_G19_PR_BASE_SHA": "${{ github.event.pull_request.base.sha || github.event.before || github.sha }}",
+                    "VT_G19_CHECKOUT_SHA": "${{ github.sha }}",
+                }
+                for key, expected_value in expected_event_env.items():
+                    if sentinel_env.get(key) != expected_value:
+                        fail(f"sentinel env must define {key} from GitHub event context")
                 for key in (
                     "VT_G19_EXPECTED_RUN_GATES_SHA",
                     "VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA",
@@ -974,8 +1000,12 @@ if top_jobs_index is not None:
                 ):
                     if not any(snippet in line for line in sentinel_exec):
                         fail(f"sentinel must compute proof material from Git blob input: {snippet}")
-                if not any(line.startswith('EXPECTED_PROOF="$(printf ') and "VT_G19_EXECUTED:%s" in line for line in sentinel_exec):
-                    fail("sentinel must recompute expected VT_G19_EXEC_PROOF preimage")
+                expected_proof_lines = [line for line in sentinel_exec if line.startswith('EXPECTED_PROOF="$(printf ')]
+                if not expected_proof_lines or "VT_G19_EXECUTED:v2" not in expected_proof_lines[0]:
+                    fail("sentinel must recompute v2 VT_G19_EXEC_PROOF preimage")
+                for snippet in ("PR_HEAD:%s", "PR_BASE:%s", "CHECKOUT:%s", "RUN_GATES:%s", "STRUCTURAL:%s", "FIXTURES:%s"):
+                    if not any(snippet in line for line in expected_proof_lines):
+                        fail(f"sentinel proof preimage must include {snippet}")
 
 if errors:
     for error in errors:

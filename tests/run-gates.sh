@@ -546,9 +546,19 @@ if [ "$FAILED" -eq 0 ]; then
   RUN_GATES_SHA="$(tracked_blob_sha256 "tests/run-gates.sh")"
   STRUCTURAL_CHECK_SHA="$(tracked_blob_sha256 "tests/g19-v2-structural-check.sh")"
   G19_FIXTURE_MANIFEST_SHA="$(fixture_manifest_sha256)"
+  PROOF_PR_HEAD_SHA="${VT_G19_PR_HEAD_SHA:-$HEAD_SHA}"
+  PROOF_PR_BASE_SHA="${VT_G19_PR_BASE_SHA:-$HEAD_SHA}"
+  PROOF_CHECKOUT_SHA="${VT_G19_CHECKOUT_SHA:-$HEAD_SHA}"
+  for proof_sha in "$PROOF_PR_HEAD_SHA" "$PROOF_PR_BASE_SHA" "$PROOF_CHECKOUT_SHA"; do
+    if ! printf '%s\n' "$proof_sha" | grep -qE '^[0-9a-f]{40}$'; then
+      echo "SETUP FAIL: invalid VT_G19 proof SHA input ($proof_sha)"
+      exit 2
+    fi
+  done
   VT_G19_EXEC_PROOF="$(
-    printf 'VT_G19_EXECUTED:%s\nRUN_GATES:%s\nSTRUCTURAL:%s\nFIXTURES:%s\n' \
-      "$HEAD_SHA" "$RUN_GATES_SHA" "$STRUCTURAL_CHECK_SHA" "$G19_FIXTURE_MANIFEST_SHA" |
+    printf 'VT_G19_EXECUTED:v2\nPR_HEAD:%s\nPR_BASE:%s\nCHECKOUT:%s\nRUN_GATES:%s\nSTRUCTURAL:%s\nFIXTURES:%s\n' \
+      "$PROOF_PR_HEAD_SHA" "$PROOF_PR_BASE_SHA" "$PROOF_CHECKOUT_SHA" \
+      "$RUN_GATES_SHA" "$STRUCTURAL_CHECK_SHA" "$G19_FIXTURE_MANIFEST_SHA" |
       sha256sum |
       awk '{print $1}'
   )"

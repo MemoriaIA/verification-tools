@@ -69,18 +69,42 @@ jobs:
 
       - name: Run verification gate suite
         id: run_gates
+        env:
+          VT_G19_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          VT_G19_PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+          VT_G19_CHECKOUT_SHA: ${{ github.sha }}
         run: |
           bash tests/run-gates.sh
 
       - name: G-19 CI anti-theater (run-gates execution proof required)
         if: always()
         env:
-          VT_G19_EXPECTED_RUN_GATES_SHA: "0e3c80877566853c0ef0c353c39eae98e035b91054e4df35bf852987c0050d3e"
-          VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA: "17b7f9994bbf53ac00db549ecce21810552a154ebc5989334ae39005e8bfa3d0"
+          VT_G19_EXPECTED_RUN_GATES_SHA: "0ce0a4b651ceeec56bf31851b5aeec132e67581c0e37bef0ce80ab9036867b8b"
+          VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA: "4cc1b80762446839660c1e7f4938a7c0c2aadbaaccde12961a4149ae44a164ce"
           VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA: "2f69f91b5b57c8b93c214dc8711d89c38ec9ae7f4e72e1dba96b84e69b8dad36"
+          VT_G19_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          VT_G19_PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+          VT_G19_CHECKOUT_SHA: ${{ github.sha }}
         run: |
           if [ "${{ steps.run_gates.outcome }}" != "success" ]; then
             echo "G-19 FAIL: tests/run-gates.sh did not complete successfully (outcome: ${{ steps.run_gates.outcome }})"
+            exit 1
+          fi
+          if ! printf '%s\n' "$VT_G19_PR_HEAD_SHA" | grep -qE '^[0-9a-f]{40}$'; then
+            echo "G-19 FAIL: PR head SHA is invalid ($VT_G19_PR_HEAD_SHA)"
+            exit 1
+          fi
+          if ! printf '%s\n' "$VT_G19_PR_BASE_SHA" | grep -qE '^[0-9a-f]{40}$'; then
+            echo "G-19 FAIL: PR base SHA is invalid ($VT_G19_PR_BASE_SHA)"
+            exit 1
+          fi
+          if ! printf '%s\n' "$VT_G19_CHECKOUT_SHA" | grep -qE '^[0-9a-f]{40}$'; then
+            echo "G-19 FAIL: checkout SHA is invalid ($VT_G19_CHECKOUT_SHA)"
+            exit 1
+          fi
+          CHECKOUT_SHA="$(git rev-parse HEAD)"
+          if [ "$CHECKOUT_SHA" != "$VT_G19_CHECKOUT_SHA" ]; then
+            echo "G-19 FAIL: checkout SHA mismatch (expected $VT_G19_CHECKOUT_SHA, got $CHECKOUT_SHA)"
             exit 1
           fi
           RUN_GATES_SHA="$(git cat-file blob "HEAD:tests/run-gates.sh" | sha256sum | awk '{print $1}')"
@@ -107,9 +131,10 @@ jobs:
             echo "G-19 FAIL: VT_G19_EXEC_PROOF is invalid ($PROOF)"
             exit 1
           fi
-          EXPECTED_PROOF="$(printf 'VT_G19_EXECUTED:%s\nRUN_GATES:%s\nSTRUCTURAL:%s\nFIXTURES:%s\n' "$(git rev-parse HEAD)" "$RUN_GATES_SHA" "$STRUCTURAL_CHECK_SHA" "$FIXTURE_MANIFEST_SHA" | sha256sum | awk '{print $1}')"
+          EXPECTED_PROOF="$(printf 'VT_G19_EXECUTED:v2\nPR_HEAD:%s\nPR_BASE:%s\nCHECKOUT:%s\nRUN_GATES:%s\nSTRUCTURAL:%s\nFIXTURES:%s\n' "$VT_G19_PR_HEAD_SHA" "$VT_G19_PR_BASE_SHA" "$CHECKOUT_SHA" "$RUN_GATES_SHA" "$STRUCTURAL_CHECK_SHA" "$FIXTURE_MANIFEST_SHA" | sha256sum | awk '{print $1}')"
           if [ "$PROOF" != "$EXPECTED_PROOF" ]; then
             echo "G-19 FAIL: VT_G19_EXEC_PROOF preimage mismatch (expected $EXPECTED_PROOF, got $PROOF)"
             exit 1
           fi
+          echo "G-19 PASS: PR head $VT_G19_PR_HEAD_SHA; base $VT_G19_PR_BASE_SHA; checkout $CHECKOUT_SHA"
           echo "G-19 PASS: Execution proved ($PROOF)"
