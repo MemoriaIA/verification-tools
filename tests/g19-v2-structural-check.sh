@@ -34,6 +34,11 @@ def fail(message):
     errors.append(message)
 
 
+for line_number, line in enumerate(lines, start=1):
+    if "\t" in line:
+        fail(f"tab character found at line {line_number}")
+
+
 def indent_of(line):
     stripped = line.lstrip(" ")
     if not stripped:
@@ -346,9 +351,13 @@ def parse_steps(steps_index, steps_end):
         if SCALAR_LINES[index]:
             index += 1
             continue
+        stripped = lines[index].strip()
+        if re.match(r'^-\s*<<\s*:', stripped):
+            fail("jobs.gates.steps must not use YAML merge keys")
+            index += 1
+            continue
         item = parse_step_item(lines[index])
         if not item or item["indent"] != 6:
-            stripped = lines[index].strip()
             if re.match(r'^-\s*[&*]', stripped):
                 fail("jobs.gates.steps must not use YAML anchors or aliases")
             elif re.match(r'^-\s*(?:&[A-Za-z0-9_-]+\s+)?[\{\[]', stripped):
@@ -397,6 +406,9 @@ def parse_step_item(line):
 
 
 def record_step_key(step, key, value, index, effective_indent):
+    if key == "<<":
+        fail("jobs.gates.steps must not use YAML merge keys")
+        return
     if key == "name":
         step["name"] = strip_quotes(value)
     else:
@@ -493,9 +505,43 @@ def normalize_shell_escapes(code):
     return re.sub(r'\\([A-Za-z0-9_./:=@%+\-])', r'\1', code)
 
 
+def decode_ansi_c_escape_payload(value):
+    def replace_hex(match):
+        return chr(int(match.group(1), 16))
+
+    value = re.sub(r'\\x([0-9A-Fa-f]{2})', replace_hex, value)
+    value = re.sub(r'\\u([0-9A-Fa-f]{4})', replace_hex, value)
+    value = re.sub(r'\\U([0-9A-Fa-f]{8})', replace_hex, value)
+    replacements = {
+        r'\a': '\a',
+        r'\b': '\b',
+        r'\e': '\x1b',
+        r'\E': '\x1b',
+        r'\f': '\f',
+        r'\n': '\n',
+        r'\r': '\r',
+        r'\t': '\t',
+        r'\v': '\v',
+        r'\\': '\\',
+        r"\'": "'",
+        r'\"': '"',
+    }
+    for escaped, replacement in replacements.items():
+        value = value.replace(escaped, replacement)
+    return value
+
+
+def decode_ansi_c_quotes(code):
+    return re.sub(
+        r"\$'((?:\\.|[^'])*)'",
+        lambda match: decode_ansi_c_escape_payload(match.group(1)),
+        code,
+    )
+
+
 def normalize_shell_words(code):
-    normalized = normalize_shell_escapes(code)
-    normalized = re.sub(r"\$'([^']*)'", r"\1", normalized)
+    normalized = decode_ansi_c_quotes(code)
+    normalized = normalize_shell_escapes(normalized)
     normalized = re.sub(r'\$"([^"]*)"', r"\1", normalized)
     normalized = normalized.replace("'", "").replace('"', "")
     return normalized
@@ -685,11 +731,17 @@ def forbidden_environment_mutation(step):
     raw_code_lines = [line.split("#", 1)[0].strip() for line in executable_lines(step["run_lines"])]
     code_lines = [normalize_shell_words(line) for line in raw_code_lines]
     for line in executable_lines(step["run_lines"]):
+        if "\t" in line:
+            return "tab-indented shell text"
         raw_code = line.split("#", 1)[0].strip()
         code = normalize_shell_words(raw_code)
         if re.search(r'(^|[^A-Za-z0-9_])eval\b', code):
             return "computed environment file"
         if re.search(r'(^|[;&|]\s*)\$\{?[A-Za-z_][A-Za-z0-9_]*\}?(?=\s|$)', code):
+            return "computed environment file"
+        if re.search(r'(^|[;&|]\s*)env\b[^#;&|]*\s(?:/usr/bin/|/bin/)?(bash|sh|dash|zsh|ksh)\s+[^#;&|]*-c(\s|$)', code):
+            return "computed environment file"
+        if re.search(r'(^|[;&|]\s*)(?:/usr/bin/|/bin/)?(bash|sh|dash|zsh|ksh)\s+[^#;&|]*-c(\s|$)', code):
             return "computed environment file"
         if re.search(r'(^|[;&|]\s*)(bash|sh|dash|zsh|ksh)\s+[^#;&|]*-c(\s|$)', code):
             return "computed environment file"

@@ -1,0 +1,30 @@
+name: G-19 v2 mutant - local hex nameref option
+on:
+  pull_request:
+  push:
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run verification gate suite
+        id: run_gates
+        run: bash tests/run-gates.sh
+      - name: G-19 CI anti-theater (run-gates execution proof required)
+        if: always()
+        run: |
+          if [ "${{ steps.run_gates.outcome }}" != "success" ]; then
+            echo "run_gates did not succeed"
+            exit 1
+          fi
+          PROOF="${{ steps.run_gates.outputs.vt_g19_exec_proof }}"
+          local -$'\x6e' P=PROOF
+          P=0000000000000000000000000000000000000000000000000000000000000000
+          if [ -z "$PROOF" ]; then
+            echo "missing proof"
+            exit 1
+          fi
+          if ! printf '%s\n' "$PROOF" | grep -qE '^[0-9a-f]{64}$'; then
+            echo "invalid proof"
+            exit 1
+          fi

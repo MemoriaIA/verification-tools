@@ -256,6 +256,7 @@ ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|baseline-an
 ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|baseline-inline-run-decoded-safe|baseline-inline-run-quoted-continuation-safe|mutant-anchored-flow-run-github-env-bashenv|mutant-anchored-flow-uses-upload-artifact|mutant-inline-run-escaped-env-github-env|mutant-inline-run-escaped-github-output-proof|mutant-inline-run-quoted-continuation-github-env|mutant-inline-run-quoted-continuation-github-output-proof|mutant-prestep-chained-escaped-eval-github-output-proof|mutant-prestep-if-escaped-eval-github-env-bashenv|mutant-prestep-while-escaped-eval-github-env-bashenv|mutant-sentinel-proof-builtin-command-nameref-overwrite|mutant-sentinel-proof-builtin-escaped-option-nameref-overwrite|mutant-sentinel-proof-chained-plain-wrapper-nameref-overwrite|mutant-sentinel-proof-chained-wrapper-nameref-overwrite|mutant-sentinel-proof-escaped-declare-option-nameref-overwrite|mutant-sentinel-proof-escaped-option-nameref-overwrite}"
 ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|mutant-alias-step-run-bash-c-github-env|mutant-anchored-block-run-bash-c-github-env|mutant-inline-run-scalar-alias-bash-c-github-env|mutant-inline-run-scalar-anchor-bash-c-github-env|mutant-prestep-ansi-quoted-eval-base64-github-env|mutant-prestep-bash-c-base64-github-env|mutant-prestep-dynamic-eval-base64-github-env|mutant-prestep-python-computed-github-env-bashenv|mutant-prestep-python-computed-github-path|mutant-prestep-quoted-eval-base64-github-env|mutant-sentinel-proof-variable-option-nameref-overwrite}"
 ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|baseline-run-folded2-safe|baseline-run-pipe2-safe|mutant-prestep-run-folded2-line2-github-env|mutant-prestep-run-folded9-chomp-github-output-proof|mutant-prestep-run-folded9-line2-github-output-proof|mutant-prestep-run-pipe2-chomp-github-env|mutant-prestep-run-pipe2-line2-bashenv|mutant-prestep-run-pipe2-line2-github-env|mutant-prestep-run-pipe-chomp2-github-env|mutant-prestep-run-pipe9-line2-github-output-proof}"
+ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|mutant-prestep-list-item-merge-poison-run|mutant-prestep-list-item-merge-poison-env|mutant-prestep-list-item-merge-poison-uses|mutant-prestep-block-ansi-u005f-env|mutant-prestep-block-ansi-x5f-env|mutant-prestep-block-ansi-u005f-output-proof|mutant-prestep-block-ansi-u005f-path|mutant-sentinel-declare-hex-n-nameref|mutant-sentinel-local-hex-n-nameref|mutant-sentinel-typeset-hex-n-nameref|mutant-sentinel-declare-ansi-n-nameref|mutant-prestep-usrbin-bash-c-github-env|mutant-prestep-env-i-bash-c-github-output-proof|mutant-prestep-sh-c-github-env|mutant-prestep-tab-indented-block-github-env}"
 ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|mutant-inline-anonymous-run-pipe2-chomp-github-env|mutant-inline-run-plain-continuation-github-env-bashenv|mutant-inline-run-plain-continuation-github-output-proof|mutant-inline-run-single-quoted-continuation-github-env-bashenv|mutant-inline-run-single-quoted-continuation-github-output-proof}"
 TRACKED_FILES="$WORK/tracked-files.txt"
 if ! git ls-files >"$TRACKED_FILES"; then
@@ -345,6 +346,10 @@ mutant-job-env-bashenv-obfuscated-output.yml
 mutant-job-env-path-poison.yml
 mutant-prestep-bashenv-forged-output.yml
 mutant-prestep-ansi-quoted-eval-base64-github-env.yml
+mutant-prestep-block-ansi-u005f-env.yml
+mutant-prestep-block-ansi-u005f-output-proof.yml
+mutant-prestep-block-ansi-u005f-path.yml
+mutant-prestep-block-ansi-x5f-env.yml
 mutant-prestep-bash-c-base64-github-env.yml
 mutant-prestep-dynamic-eval-base64-github-env.yml
 mutant-prestep-computed-github-output-proof-write.yml
@@ -376,12 +381,19 @@ mutant-prestep-github-path-chocolatey-poison.yml
 mutant-prestep-github-path-python-poison.yml
 mutant-prestep-heredoc-github-output-proof-write.yml
 mutant-prestep-indirect-github-output-proof-write.yml
+mutant-prestep-list-item-merge-poison-env.yml
+mutant-prestep-list-item-merge-poison-run.yml
+mutant-prestep-list-item-merge-poison-uses.yml
 mutant-prestep-obfuscated-env-poison.yml
 mutant-prestep-python-computed-github-env-bashenv.yml
 mutant-prestep-python-computed-github-path.yml
 mutant-prestep-split-github-env-bashenv.yml
 mutant-prestep-split-github-output-proof.yml
 mutant-prestep-split-github-path.yml
+mutant-prestep-env-i-bash-c-github-output-proof.yml
+mutant-prestep-sh-c-github-env.yml
+mutant-prestep-tab-indented-block-github-env.yml
+mutant-prestep-usrbin-bash-c-github-env.yml
 mutant-job-default-shell-alias-or-true.yml
 mutant-job-default-shell-flow-map-or-true.yml
 mutant-job-default-shell-merge-key-or-true.yml
@@ -407,6 +419,8 @@ mutant-or-true-paren.yml
 mutant-or-true.yml
 mutant-semicolon-true.yml
 mutant-sentinel-case-inert-guard.yml
+mutant-sentinel-declare-ansi-n-nameref.yml
+mutant-sentinel-declare-hex-n-nameref.yml
 mutant-sentinel-echo-only-failure.yml
 mutant-sentinel-exit-in-else-branch.yml
 mutant-sentinel-false-and-brace-group.yml
@@ -417,6 +431,7 @@ mutant-sentinel-fake-outcome-comparison.yml
 mutant-sentinel-invalid-proof-echo-branch.yml
 mutant-sentinel-invalid-proof-elif-exit.yml
 mutant-sentinel-invalid-proof-nested-inert-exit.yml
+mutant-sentinel-local-hex-n-nameref.yml
 mutant-sentinel-missing-proof-elif-exit.yml
 mutant-sentinel-missing-proof-nested-inert-exit.yml
 mutant-sentinel-outcome-elif-exit.yml
@@ -445,6 +460,7 @@ mutant-sentinel-skipped-or-group.yml
 mutant-sentinel-split-line-function.yml
 mutant-sentinel-step-if-skipped.yml
 mutant-sentinel-trap-exit-zero.yml
+mutant-sentinel-typeset-hex-n-nameref.yml
 mutant-sentinel-uncalled-function.yml
 mutant-sentinel-unreachable-invalid-proof-guard.yml
 mutant-sentinel-unreachable-missing-proof-guard.yml
@@ -519,6 +535,10 @@ echo
 if [ "$FAILED" -eq 0 ]; then
   echo "ALL GATES PASS"
   HEAD_SHA="$(git rev-parse HEAD 2>/dev/null || printf 'unknown')"
+  RUN_GATES_SHA="$(sha256sum tests/run-gates.sh | awk '{print $1}')"
+  STRUCTURAL_CHECK_SHA="$(sha256sum tests/g19-v2-structural-check.sh | awk '{print $1}')"
+  G19_PROOF_MATERIAL="${G19_PROOF_MATERIAL}SCRIPT|tests/run-gates.sh|${RUN_GATES_SHA}"$'\n'
+  G19_PROOF_MATERIAL="${G19_PROOF_MATERIAL}SCRIPT|tests/g19-v2-structural-check.sh|${STRUCTURAL_CHECK_SHA}"$'\n'
   VT_G19_EXEC_PROOF="$(printf 'VT_G19_EXECUTED:%s\n%s' "$HEAD_SHA" "$G19_PROOF_MATERIAL" | sha256sum | awk '{print $1}')"
   echo "VT_G19_EXEC_PROOF=$VT_G19_EXEC_PROOF"
   [ -n "${GITHUB_OUTPUT:-}" ] && echo "vt_g19_exec_proof=$VT_G19_EXEC_PROOF" >> "$GITHUB_OUTPUT"
