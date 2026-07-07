@@ -19,6 +19,7 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && (cygpath -m "$(pwd)" 2>/dev/null || pwd -W 2>/dev/null || pwd))"
 cd "$ROOT"
+ROOT_PHYSICAL="$(pwd -P)"
 
 reject_git_environment_poisoning() {
   for name in \
@@ -166,9 +167,9 @@ resolve_trusted_git() {
     exit 2
   fi
   git_root="$("$candidate" rev-parse --show-toplevel 2>/dev/null || true)"
-  git_root="$(cd "$git_root" 2>/dev/null && (cygpath -m "$(pwd)" 2>/dev/null || pwd -W 2>/dev/null || pwd) || true)"
-  if [ "$git_root" != "$ROOT" ]; then
-    echo "SETUP FAIL: git executable root mismatch (expected $ROOT, got $git_root)" >&2
+  git_root_physical="$(cd "$git_root" 2>/dev/null && pwd -P || true)"
+  if [ "$git_root_physical" != "$ROOT_PHYSICAL" ]; then
+    echo "SETUP FAIL: git executable root mismatch (expected $ROOT_PHYSICAL, got $git_root_physical)" >&2
     exit 2
   fi
   for required_blob in \
