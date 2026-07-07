@@ -858,6 +858,68 @@ if [ "$G19_FIXTURE_MISSING" -eq 0 ]; then
   done
 fi
 
+WHITESPACE_REPO="$WORK/whitespace-range-repo"
+mkdir -p "$WHITESPACE_REPO"
+WHITESPACE_OUT="$ROOT/$OUT"
+if (
+  cd "$WHITESPACE_REPO" &&
+  git init -q &&
+  git config user.name "verification-tools-gates" &&
+  git config user.email "verification-tools@example.invalid" &&
+  git config core.autocrlf false &&
+  printf 'alpha\n' > clean.txt &&
+  git add clean.txt &&
+  git commit -q -m "base" &&
+  WS_BASE_SHA="$(git rev-parse HEAD)" &&
+  printf 'alpha   \n' > clean.txt &&
+  git add clean.txt &&
+  git commit -q -m "head-with-whitespace" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  git diff --check >"$WHITESPACE_OUT" 2>&1
+); then
+  pass "G-20 bare git diff --check misses committed whitespace on clean worktree"
+else
+  fail "G-20 bare git diff --check misses committed whitespace on clean worktree" "$(tr '\n' ';' <"$WHITESPACE_OUT")"
+fi
+
+if (
+  cd "$WHITESPACE_REPO" &&
+  WS_BASE_SHA="$(git rev-parse HEAD~1)" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  git diff --check "$WS_BASE_SHA..$WS_HEAD_SHA" >"$WHITESPACE_OUT" 2>&1
+); then
+  fail "G-21 range-aware whitespace guard rejects committed whitespace" "range-aware diff unexpectedly passed"
+else
+  pass "G-21 range-aware whitespace guard rejects committed whitespace"
+fi
+
+if (
+  cd "$WHITESPACE_REPO" &&
+  WS_BASE_SHA="0000000000000000000000000000000000000000" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  git cat-file -e "$WS_BASE_SHA^{commit}" 2>/dev/null &&
+  git diff --check "$WS_BASE_SHA..$WS_HEAD_SHA" >"$WHITESPACE_OUT" 2>&1
+); then
+  fail "G-22 whitespace guard rejects invalid base SHA" "invalid base SHA unexpectedly passed"
+else
+  pass "G-22 whitespace guard rejects invalid base SHA"
+fi
+
+if (
+  cd "$WHITESPACE_REPO" &&
+  git checkout -q HEAD~1 &&
+  WS_BASE_SHA="$(git rev-parse HEAD)" &&
+  printf 'beta\n' > clean.txt &&
+  git add clean.txt &&
+  git commit -q -m "head-clean" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  git diff --check "$WS_BASE_SHA..$WS_HEAD_SHA" >"$WHITESPACE_OUT" 2>&1
+); then
+  pass "G-23 range-aware whitespace guard passes clean committed range"
+else
+  fail "G-23 range-aware whitespace guard passes clean committed range" "$(tr '\n' ';' <"$WHITESPACE_OUT")"
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then
   HEAD_SHA="$("$GIT_BIN" rev-parse HEAD 2>/dev/null || printf 'unknown')"

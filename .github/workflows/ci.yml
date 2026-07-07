@@ -26,6 +26,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -63,8 +65,29 @@ jobs:
           python -m py_compile memoriaia/verify/verify-hashchain.py
 
       - name: Whitespace guard
+        env:
+          VT_WS_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
+          VT_WS_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          git diff --check
+          if ! printf '%s\n' "$VT_WS_BASE_SHA" | grep -qE '^[0-9a-f]{40}$'; then
+            echo "WHITESPACE FAIL: base SHA is invalid ($VT_WS_BASE_SHA)"
+            exit 1
+          fi
+          if ! printf '%s\n' "$VT_WS_HEAD_SHA" | grep -qE '^[0-9a-f]{40}$'; then
+            echo "WHITESPACE FAIL: head SHA is invalid ($VT_WS_HEAD_SHA)"
+            exit 1
+          fi
+          if ! git cat-file -e "$VT_WS_BASE_SHA^{commit}" 2>/dev/null; then
+            echo "WHITESPACE FAIL: base commit is unavailable ($VT_WS_BASE_SHA)"
+            exit 1
+          fi
+          if ! git cat-file -e "$VT_WS_HEAD_SHA^{commit}" 2>/dev/null; then
+            echo "WHITESPACE FAIL: head commit is unavailable ($VT_WS_HEAD_SHA)"
+            exit 1
+          fi
+          WHITESPACE_RANGE="$VT_WS_BASE_SHA..$VT_WS_HEAD_SHA"
+          echo "WHITESPACE RANGE: $WHITESPACE_RANGE"
+          git diff --check "$WHITESPACE_RANGE"
 
       - name: Run verification gate suite
         id: run_gates
@@ -180,8 +203,8 @@ jobs:
       - name: G-19 CI anti-theater (run-gates execution proof required)
         if: always()
         env:
-          VT_G19_EXPECTED_RUN_GATES_SHA: "d1ec3239d04d0cd3e716a2a6054befb76723146396f2de25550b194c36ff234b"
-          VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA: "4863e581cfa202621ca8a1529c0fca44faa348b4df30e1eb31e84addc1432716"
+          VT_G19_EXPECTED_RUN_GATES_SHA: "0698b217eff2ac9933df31647b86bd77c8ce3d6f5457a1d98c1aea13bd9ca679"
+          VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA: "19f3cb6147db94993a3f3f5e53e6dc91e5694c62d719d7b935fbde44f0b5a800"
           VT_G19_EXPECTED_WORKSPACE_HELPER_SHA: "e105de0bca00c509bfff6923515cccb9ab416013a20f17ff90a7159c52890a06"
           VT_G19_EXPECTED_VERIFY_PY_SHA: "abedd126eac0227dddad9267d8863d1b3b4921ef0bdc69301f59b9c9d708683b"
           VT_G19_EXPECTED_VERIFY_SH_SHA: "65694b5e0abe95f3322c45ab7c69b597d83121ec14001bdbba8e6e83f2224192"
