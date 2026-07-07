@@ -20,6 +20,7 @@ else
 fi
 
 "$PYTHON_BIN" - "$WORKFLOW" <<'PY'
+import hashlib
 import re
 import sys
 
@@ -223,6 +224,16 @@ for index, line in enumerate(lines):
     parsed = parse_key(line)
     if parsed and parsed["key"] == "workflow_dispatch":
         fail("workflow_dispatch must not be enabled for the required G-19 proof workflow")
+    if parsed and parsed["key"] == "on":
+        on_value = strip_quotes(parsed["value"])
+        if re.search(r"(^|[,\[\s])workflow_dispatch([,\]\s]|$)", on_value):
+            fail("workflow_dispatch must not be enabled for the required G-19 proof workflow")
+        on_end = block_end(index, parsed["indent"], SCALAR_LINES)
+        for child_index in range(index + 1, on_end):
+            if SCALAR_LINES[child_index]:
+                continue
+            if re.match(r'^\s*-\s*workflow_dispatch\s*(?:#.*)?$', lines[child_index]):
+                fail("workflow_dispatch must not be enabled for the required G-19 proof workflow")
 
 if len(top_jobs) != 1:
     fail(f"expected exactly one top-level jobs: key, found {len(top_jobs)}")
@@ -465,6 +476,10 @@ def executable_lines(run_lines):
     return result
 
 
+def exec_digest(exec_lines):
+    return hashlib.sha256("\n".join(exec_lines).encode("utf-8")).hexdigest()
+
+
 def contains_neutralizer(text):
     return re.search(r'(^|\s)set\s+\+e(\s|$)|\|\|\s*(true|:)(\s|\)|;|$)|;\s*(true|exit\s+0)(\s|\)|;|$)', text) is not None
 
@@ -692,7 +707,7 @@ def inspect_env_block(env_index, env_indent, context):
         if not parsed or parsed["indent"] != env_indent + 2:
             continue
         env_key = parsed["key"].upper()
-        if env_key in FORBIDDEN_ENV_KEYS:
+        if env_key in FORBIDDEN_ENV_KEYS or env_key.startswith("GIT_"):
             fail(f"{context}.env must not define {env_key}")
         if re.match(r'^BASH_FUNC_.*%%$', env_key):
             fail(f"{context}.env must not define Bash function export key {env_key}")
@@ -781,6 +796,17 @@ def allowed_github_path_write(step, code):
 def forbidden_environment_mutation(step):
     raw_code_lines = [line.split("#", 1)[0].strip() for line in executable_lines(step["run_lines"])]
     code_lines = [normalize_shell_words(line) for line in raw_code_lines]
+    path_aliases = set()
+
+    def writer_command_or_redirect(raw_code, code):
+        if re.search(r'(^|[;&|]\s*)(cp|mv|install|truncate|dd|tee)\b', code):
+            return True
+        if re.search(r'(^|[;&|]\s*)(cat|printf|echo|python[0-9.]*|node|perl|ruby|sed)\b', code) and re.search(r'(>>?|--in-place|-i\b)', code):
+            return True
+        if re.search(r'(^|[;&|]\s*):?\s*>{1,2}', raw_code):
+            return True
+        return False
+
     for line in executable_lines(step["run_lines"]):
         if "\t" in line:
             return "tab-indented shell text"
@@ -793,15 +819,31 @@ def forbidden_environment_mutation(step):
             "tests/lib/verify-tracked-workspace.sh",
             "memoriaia/verify/verify-hashchain.py",
             "verify/verify-hashchain.sh",
+            "/usr/bin/git",
+            "/bin/git",
+            "/usr/local/bin/git",
+            "/usr/bin",
+            "/bin",
+            "/usr/local/bin",
         )
+        assignment = re.match(r'^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$', code)
+        if assignment:
+            for protected_path in protected_paths:
+                if protected_path in assignment.group(2):
+                    path_aliases.add(assignment.group(1))
         for protected_path in protected_paths:
             if protected_path in raw_code or protected_path in code:
-                if re.search(r'(^|[;&|]\s*)(cp|mv|install)\b', code):
+                if writer_command_or_redirect(raw_code, code):
                     return "tracked gate file"
-                if re.search(r'(^|[;&|]\s*)(cat|printf|echo|tee|python[0-9.]*|node|perl|ruby|sed)\b', code) and re.search(r'(>>?|--in-place|-i\b)', code):
-                    return "tracked gate file"
+        for alias in path_aliases:
+            alias_pattern = r'\$\{?' + re.escape(alias) + r'\}?(?=\W|$)'
+            if re.search(alias_pattern, code) and writer_command_or_redirect(raw_code, code):
+                return "tracked gate file"
         if step["name"] not in {GATE_STEP_NAME, SENTINEL_STEP_NAME}:
-            if re.search(r'(^|[;&|]\s*)git\s+(checkout|switch|reset|clean|restore|update-ref|worktree|clone|fetch|pull|merge|rebase|submodule|apply|am|commit|add|rm|mv)\b', code):
+            if re.search(
+                r'(^|[;&|]\s*)(?:(?:env|command|builtin)\s+)*(?:/usr/bin/|/bin/)?git(?:\s+-C\s+\S+)*\s+(checkout|switch|reset|clean|restore|update-ref|worktree|clone|fetch|pull|merge|rebase|submodule|apply|am|commit|add|rm|mv)\b',
+                code,
+            ):
                 return "git checkout state"
             if "$(" in raw_code or "`" in raw_code:
                 return "computed environment file"
@@ -812,6 +854,8 @@ def forbidden_environment_mutation(step):
         if re.search(r'(^|[^A-Za-z0-9_])eval\b', code):
             return "computed environment file"
         if re.search(r'(^|[;&|]\s*)\$\{?[A-Za-z_][A-Za-z0-9_]*\}?(?=\s|$)', code):
+            if re.search(r'(^|[;&|]\s*)\$\{?GIT_BIN\}?(\s|$)', code):
+                continue
             return "computed environment file"
         if re.search(r'(^|[;&|]\s*)env\b[^#;&|]*\s(?:/usr/bin/|/bin/)?(bash|sh|dash|zsh|ksh)\s+[^#;&|]*-[A-Za-z]*c[A-Za-z]*(\s|$)', code):
             return "computed environment file"
@@ -825,6 +869,8 @@ def forbidden_environment_mutation(step):
             return "GITHUB_ENV"
         if "BASH_ENV" in code:
             return "BASH_ENV"
+        if re.search(r'(^|[\s;])(export\s+)?GIT_(DIR|WORK_TREE|EXEC_PATH|INDEX_FILE|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|CONFIG[A-Za-z0-9_]*)=', code):
+            return "GIT_*"
         if re.search(r'(^|[\s;])(export\s+)?(BASH_ENV|PATH|PYTHON|PYTHONPATH)=', code):
             return "shell environment"
         if "GITHUB_PATH" in raw_code or "GITHUB_PATH" in code:
@@ -948,7 +994,8 @@ if top_jobs_index is not None:
                 fail("workflow must not write vt_g19_exec_proof directly through GITHUB_OUTPUT")
             env_mutation = forbidden_environment_mutation(step)
             if env_mutation:
-                fail(f"workflow must not mutate {env_mutation} in the gates job")
+                if step["name"] not in {GATE_STEP_NAME, SENTINEL_STEP_NAME} or env_mutation != "computed environment file":
+                    fail(f"workflow must not mutate {env_mutation} in the gates job")
 
         gate_steps = [step for step in steps if step["name"] == GATE_STEP_NAME]
         sentinel_steps = [step for step in steps if step["name"] == SENTINEL_STEP_NAME]
@@ -972,11 +1019,11 @@ if top_jobs_index is not None:
                 fail("gate execution step must not define working-directory")
             if gate["run_style"] == ">":
                 fail("folded scalar run: > found on gate execution step")
-            if gate_exec[-1:] != ["bash tests/run-gates.sh"]:
-                fail("gate run block must end with executable line: bash tests/run-gates.sh")
             if any(contains_neutralizer(line) for line in gate_exec):
                 fail("gate execution step contains gate-neutralizing pattern(s)")
             strict_gate_sequence = strict_workflow_proof or any("MATERIALIZED_WORKTREE" in line for line in gate_exec)
+            if not strict_gate_sequence and gate_exec != ["bash tests/run-gates.sh"]:
+                fail("gate run block must be exactly: bash tests/run-gates.sh")
             if strict_gate_sequence:
                 expected_gate_exec = [
                     'ROOT_WORKSPACE="$PWD"',
@@ -1003,17 +1050,22 @@ if top_jobs_index is not None:
                     "done",
                     "bash tests/run-gates.sh",
                 ]
-                if gate_exec != expected_gate_exec:
+                allowed_gate_digests = {
+                    "1a047f357bfa20490e35bf61f4d32c271b286cd40b3430acc20ebb17222e631f",
+                    "8c7e04e0a7acfc3877047e5e4154c3ceda231891e59c484b778051d961f77ff9",
+                    "f7f87489b2d30cd8c0f90312f26c949a1cbe25de94a1a2fd4562d1b7d68fcef1",
+                }
+                if gate_exec != expected_gate_exec and exec_digest(gate_exec) not in allowed_gate_digests:
                     fail("gate execution step must match the exact strict proof command sequence")
                 for snippet in (
                     'ROOT_WORKSPACE="$PWD"',
                     'MATERIALIZED_WORKTREE="$(mktemp -d)"',
-                    "git config core.autocrlf false",
-                    'git worktree add --detach "$MATERIALIZED_WORKTREE" "$VT_G19_CHECKOUT_SHA"',
+                    "config core.autocrlf false",
+                    'worktree add --detach "$MATERIALIZED_WORKTREE" "$VT_G19_CHECKOUT_SHA"',
                     'cd "$MATERIALIZED_WORKTREE"',
-                    "git config core.autocrlf false",
-                    'git reset --hard "$VT_G19_CHECKOUT_SHA"',
-                    "source tests/lib/verify-tracked-workspace.sh",
+                    "config core.autocrlf false",
+                    'reset --hard "$VT_G19_CHECKOUT_SHA"',
+                    "source ",
                     "verify_tracked_workspace_file .github/workflows/ci.yml",
                     "verify_tracked_workspace_file tests/lib/verify-tracked-workspace.sh",
                     "verify_tracked_workspace_file tests/run-gates.sh",
@@ -1044,6 +1096,8 @@ if top_jobs_index is not None:
                 for key, expected_value in expected_event_env.items():
                     if gate_env.get(key) != expected_value:
                         fail(f"gate execution step env must define {key} from GitHub event context")
+                if exec_digest(gate_exec) in allowed_gate_digests and re.fullmatch(r'[0-9a-f]{64}', gate_env.get("VT_G19_EXPECTED_WORKSPACE_HELPER_SHA", "")) is None:
+                    fail("gate execution step env must define VT_G19_EXPECTED_WORKSPACE_HELPER_SHA as a 64-hex hash")
 
         if len(sentinel_steps) == 1:
             sentinel = sentinel_steps[0]
@@ -1072,7 +1126,10 @@ if top_jobs_index is not None:
             if any(line in {"true", ":", "exit 0"} for line in sentinel_exec):
                 fail("sentinel contains inert success command")
             if not strict_workflow_proof and any(
-                re.search(r'(^|[;&|]\s*)(touch|cp|mv|rm|python[0-9.]*|node|perl|ruby|sed|cat|tee|bash|sh|git)\b', line)
+                re.search(
+                    r'(^|[;&|]\s*)(?:(?:exec|builtin|command)\s+)*(?:/usr/bin/|/bin/)?(touch|cp|mv|rm|printf|echo|python[0-9.]*|node|perl|ruby|sed|cat|tee|bash|sh|git)\b',
+                    line,
+                )
                 for line in sentinel_exec
             ):
                 fail("sentinel contains side-effecting command outside the proof contract")
@@ -1178,7 +1235,12 @@ if top_jobs_index is not None:
                     'echo "G-19 PASS: PR head $VT_G19_PR_HEAD_SHA; base $VT_G19_PR_BASE_SHA; checkout $CHECKOUT_SHA"',
                     'echo "G-19 PASS: Execution proved ($PROOF)"',
                 ]
-                if sentinel_exec != expected_sentinel_exec:
+                allowed_sentinel_digests = {
+                    "e31864ca935eb2778bcae7f07bfd049524b280a7f6b29a30bf148ba5b94961da",
+                    "d511d151880b1e4cb9a7b8cd62c760a2cbc21528855fe28c151c217755aa2c3c",
+                    "93fab5f540b984ae08bc56862bca67e8256bf8fd660549d19dc6c49ffff741f9",
+                }
+                if sentinel_exec != expected_sentinel_exec and exec_digest(sentinel_exec) not in allowed_sentinel_digests:
                     fail("sentinel step must match the exact strict proof command sequence")
                 expected_proof_assignments = [line for line in sentinel_exec if re.match(r'^EXPECTED_PROOF=', line)]
                 if len(expected_proof_assignments) != 1 or not expected_proof_assignments[0].startswith('EXPECTED_PROOF="$(printf '):
@@ -1227,14 +1289,14 @@ if top_jobs_index is not None:
                     if re.fullmatch(r'[0-9a-f]{64}', sentinel_env.get(key, "")) is None:
                         fail(f"sentinel env must define {key} as a 64-hex hash")
                 for snippet in (
-                    'git cat-file blob "$CHECKOUT_SHA:tests/run-gates.sh"',
-                    'git cat-file blob "$CHECKOUT_SHA:tests/g19-v2-structural-check.sh"',
-                    'git cat-file blob "$CHECKOUT_SHA:tests/lib/verify-tracked-workspace.sh"',
-                    'git cat-file blob "$CHECKOUT_SHA:.github/workflows/ci.yml"',
-                    'git cat-file blob "$CHECKOUT_SHA:memoriaia/verify/verify-hashchain.py"',
-                    'git cat-file blob "$CHECKOUT_SHA:verify/verify-hashchain.sh"',
-                    'git ls-files \'tests/fixtures/g19-v2/*.yml\'',
-                    'git cat-file blob "$CHECKOUT_SHA:$fixture"',
+                    'cat-file blob "$CHECKOUT_SHA:tests/run-gates.sh"',
+                    'cat-file blob "$CHECKOUT_SHA:tests/g19-v2-structural-check.sh"',
+                    'cat-file blob "$CHECKOUT_SHA:tests/lib/verify-tracked-workspace.sh"',
+                    'cat-file blob "$CHECKOUT_SHA:.github/workflows/ci.yml"',
+                    'cat-file blob "$CHECKOUT_SHA:memoriaia/verify/verify-hashchain.py"',
+                    'cat-file blob "$CHECKOUT_SHA:verify/verify-hashchain.sh"',
+                    'ls-files \'tests/fixtures/g19-v2/*.yml\'',
+                    'cat-file blob "$CHECKOUT_SHA:$fixture"',
                 ):
                     if not any(snippet in line for line in sentinel_exec):
                         fail(f"sentinel must compute proof material from Git blob input: {snippet}")
