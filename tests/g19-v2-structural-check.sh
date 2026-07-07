@@ -223,6 +223,10 @@ for index, line in enumerate(lines):
     parsed = parse_key(line)
     if parsed and parsed["key"] == "workflow_dispatch":
         fail("workflow_dispatch must not be enabled for the required G-19 proof workflow")
+    if parsed and parsed["key"] == "on":
+        on_value = strip_quotes(parsed["value"])
+        if re.search(r"(^|[,\[\s])workflow_dispatch([,\]\s]|$)", on_value):
+            fail("workflow_dispatch must not be enabled for the required G-19 proof workflow")
 
 if len(top_jobs) != 1:
     fail(f"expected exactly one top-level jobs: key, found {len(top_jobs)}")
@@ -796,12 +800,12 @@ def forbidden_environment_mutation(step):
         )
         for protected_path in protected_paths:
             if protected_path in raw_code or protected_path in code:
-                if re.search(r'(^|[;&|]\s*)(cp|mv|install)\b', code):
+                if re.search(r'(^|[;&|]\s*)(cp|mv|install|truncate|dd)\b', code):
                     return "tracked gate file"
                 if re.search(r'(^|[;&|]\s*)(cat|printf|echo|tee|python[0-9.]*|node|perl|ruby|sed)\b', code) and re.search(r'(>>?|--in-place|-i\b)', code):
                     return "tracked gate file"
         if step["name"] not in {GATE_STEP_NAME, SENTINEL_STEP_NAME}:
-            if re.search(r'(^|[;&|]\s*)git\s+(checkout|switch|reset|clean|restore|update-ref|worktree|clone|fetch|pull|merge|rebase|submodule|apply|am|commit|add|rm|mv)\b', code):
+            if re.search(r'(^|[;&|]\s*)(?:(?:command|builtin)\s+)?git\s+(checkout|switch|reset|clean|restore|update-ref|worktree|clone|fetch|pull|merge|rebase|submodule|apply|am|commit|add|rm|mv)\b', code):
                 return "git checkout state"
             if "$(" in raw_code or "`" in raw_code:
                 return "computed environment file"
@@ -972,11 +976,11 @@ if top_jobs_index is not None:
                 fail("gate execution step must not define working-directory")
             if gate["run_style"] == ">":
                 fail("folded scalar run: > found on gate execution step")
-            if gate_exec[-1:] != ["bash tests/run-gates.sh"]:
-                fail("gate run block must end with executable line: bash tests/run-gates.sh")
             if any(contains_neutralizer(line) for line in gate_exec):
                 fail("gate execution step contains gate-neutralizing pattern(s)")
             strict_gate_sequence = strict_workflow_proof or any("MATERIALIZED_WORKTREE" in line for line in gate_exec)
+            if not strict_gate_sequence and gate_exec != ["bash tests/run-gates.sh"]:
+                fail("gate run block must be exactly: bash tests/run-gates.sh")
             if strict_gate_sequence:
                 expected_gate_exec = [
                     'ROOT_WORKSPACE="$PWD"',
@@ -1072,7 +1076,7 @@ if top_jobs_index is not None:
             if any(line in {"true", ":", "exit 0"} for line in sentinel_exec):
                 fail("sentinel contains inert success command")
             if not strict_workflow_proof and any(
-                re.search(r'(^|[;&|]\s*)(touch|cp|mv|rm|python[0-9.]*|node|perl|ruby|sed|cat|tee|bash|sh|git)\b', line)
+                re.search(r'(^|[;&|]\s*)(touch|cp|mv|rm|printf|echo|python[0-9.]*|node|perl|ruby|sed|cat|tee|bash|sh|git)\b', line)
                 for line in sentinel_exec
             ):
                 fail("sentinel contains side-effecting command outside the proof contract")
