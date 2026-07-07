@@ -98,6 +98,10 @@ jobs:
             echo "G-19 FAIL: proof-critical git environment variable is set (GIT_ALTERNATE_OBJECT_DIRECTORIES)"
             exit 1
           fi
+          if [ -n "${GIT_CONFIG:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_CONFIG)"
+            exit 1
+          fi
           if [ -n "${GIT_CONFIG_GLOBAL:-}" ]; then
             echo "G-19 FAIL: proof-critical git environment variable is set (GIT_CONFIG_GLOBAL)"
             exit 1
@@ -108,6 +112,14 @@ jobs:
           fi
           if [ -n "${GIT_CONFIG_NOSYSTEM:-}" ]; then
             echo "G-19 FAIL: proof-critical git environment variable is set (GIT_CONFIG_NOSYSTEM)"
+            exit 1
+          fi
+          if [ -n "${GIT_NAMESPACE:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_NAMESPACE)"
+            exit 1
+          fi
+          if [ -n "${GIT_CEILING_DIRECTORIES:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_CEILING_DIRECTORIES)"
             exit 1
           fi
           git_config_env="$(env | sed -n 's/^\(GIT_CONFIG_[^=]*\)=.*/\1/p' | head -n 1)"
@@ -164,12 +176,12 @@ jobs:
       - name: G-19 CI anti-theater (run-gates execution proof required)
         if: always()
         env:
-          VT_G19_EXPECTED_RUN_GATES_SHA: "0e04fb1be0c1557d6899031b470136bde04fbbaaf8c977270e695a7d2be9e508"
-          VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA: "974776bc43525ca66ebc4ccbc81e3bfc525dbdac771f922d67ffac9186f6a7ff"
+          VT_G19_EXPECTED_RUN_GATES_SHA: "af56651d70f46dfcf124bed4e41632565be87eacbd123ba13a7348ad99d15283"
+          VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA: "db8e425f0f23914c37bcfb4f99a05eaf7c1e5ff75ff78dd0e9eeb8c651258232"
           VT_G19_EXPECTED_WORKSPACE_HELPER_SHA: "e105de0bca00c509bfff6923515cccb9ab416013a20f17ff90a7159c52890a06"
           VT_G19_EXPECTED_VERIFY_PY_SHA: "abedd126eac0227dddad9267d8863d1b3b4921ef0bdc69301f59b9c9d708683b"
           VT_G19_EXPECTED_VERIFY_SH_SHA: "65694b5e0abe95f3322c45ab7c69b597d83121ec14001bdbba8e6e83f2224192"
-          VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA: "02d1b4e074ecc70c99b266aebede1c4773a6c5397945d9bf3a9bb79dba107d44"
+          VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA: "ba4df165f7fa9a5738f5e9d128e6dd935e1ea2ea2a9f5cb6d3b0872faf5f3c3e"
           VT_G19_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           VT_G19_PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
           VT_G19_CHECKOUT_SHA: ${{ github.sha }}
@@ -198,6 +210,10 @@ jobs:
             echo "G-19 FAIL: proof-critical git environment variable is set (GIT_ALTERNATE_OBJECT_DIRECTORIES)"
             exit 1
           fi
+          if [ -n "${GIT_CONFIG:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_CONFIG)"
+            exit 1
+          fi
           if [ -n "${GIT_CONFIG_GLOBAL:-}" ]; then
             echo "G-19 FAIL: proof-critical git environment variable is set (GIT_CONFIG_GLOBAL)"
             exit 1
@@ -208,6 +224,14 @@ jobs:
           fi
           if [ -n "${GIT_CONFIG_NOSYSTEM:-}" ]; then
             echo "G-19 FAIL: proof-critical git environment variable is set (GIT_CONFIG_NOSYSTEM)"
+            exit 1
+          fi
+          if [ -n "${GIT_NAMESPACE:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_NAMESPACE)"
+            exit 1
+          fi
+          if [ -n "${GIT_CEILING_DIRECTORIES:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_CEILING_DIRECTORIES)"
             exit 1
           fi
           git_config_env="$(env | sed -n 's/^\(GIT_CONFIG_[^=]*\)=.*/\1/p' | head -n 1)"

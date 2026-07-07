@@ -228,6 +228,12 @@ for index, line in enumerate(lines):
         on_value = strip_quotes(parsed["value"])
         if re.search(r"(^|[,\[\s])workflow_dispatch([,\]\s]|$)", on_value):
             fail("workflow_dispatch must not be enabled for the required G-19 proof workflow")
+        on_end = block_end(index, parsed["indent"], SCALAR_LINES)
+        for child_index in range(index + 1, on_end):
+            if SCALAR_LINES[child_index]:
+                continue
+            if re.match(r'^\s*-\s*workflow_dispatch\s*(?:#.*)?$', lines[child_index]):
+                fail("workflow_dispatch must not be enabled for the required G-19 proof workflow")
 
 if len(top_jobs) != 1:
     fail(f"expected exactly one top-level jobs: key, found {len(top_jobs)}")
@@ -790,6 +796,17 @@ def allowed_github_path_write(step, code):
 def forbidden_environment_mutation(step):
     raw_code_lines = [line.split("#", 1)[0].strip() for line in executable_lines(step["run_lines"])]
     code_lines = [normalize_shell_words(line) for line in raw_code_lines]
+    path_aliases = set()
+
+    def writer_command_or_redirect(raw_code, code):
+        if re.search(r'(^|[;&|]\s*)(cp|mv|install|truncate|dd|tee)\b', code):
+            return True
+        if re.search(r'(^|[;&|]\s*)(cat|printf|echo|python[0-9.]*|node|perl|ruby|sed)\b', code) and re.search(r'(>>?|--in-place|-i\b)', code):
+            return True
+        if re.search(r'(^|[;&|]\s*):?\s*>{1,2}', raw_code):
+            return True
+        return False
+
     for line in executable_lines(step["run_lines"]):
         if "\t" in line:
             return "tab-indented shell text"
@@ -802,15 +819,26 @@ def forbidden_environment_mutation(step):
             "tests/lib/verify-tracked-workspace.sh",
             "memoriaia/verify/verify-hashchain.py",
             "verify/verify-hashchain.sh",
+            "/usr/bin/git",
+            "/bin/git",
+            "/usr/local/bin/git",
+            "/usr/bin",
+            "/bin",
+            "/usr/local/bin",
         )
+        assignment = re.match(r'^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$', code)
+        if assignment:
+            for protected_path in protected_paths:
+                if protected_path in assignment.group(2):
+                    path_aliases.add(assignment.group(1))
         for protected_path in protected_paths:
             if protected_path in raw_code or protected_path in code:
-                if re.search(r'(^|[;&|]\s*)(cp|mv|install|truncate|dd|tee)\b', code):
+                if writer_command_or_redirect(raw_code, code):
                     return "tracked gate file"
-                if re.search(r'(^|[;&|]\s*)(cat|printf|echo|python[0-9.]*|node|perl|ruby|sed)\b', code) and re.search(r'(>>?|--in-place|-i\b)', code):
-                    return "tracked gate file"
-                if re.search(r'(^|[;&|]\s*):?\s*>{1,2}', raw_code):
-                    return "tracked gate file"
+        for alias in path_aliases:
+            alias_pattern = r'\$\{?' + re.escape(alias) + r'\}?(?=\W|$)'
+            if re.search(alias_pattern, code) and writer_command_or_redirect(raw_code, code):
+                return "tracked gate file"
         if step["name"] not in {GATE_STEP_NAME, SENTINEL_STEP_NAME}:
             if re.search(
                 r'(^|[;&|]\s*)(?:(?:env|command|builtin)\s+)*(?:/usr/bin/|/bin/)?git(?:\s+-C\s+\S+)*\s+(checkout|switch|reset|clean|restore|update-ref|worktree|clone|fetch|pull|merge|rebase|submodule|apply|am|commit|add|rm|mv)\b',
@@ -1023,7 +1051,8 @@ if top_jobs_index is not None:
                     "bash tests/run-gates.sh",
                 ]
                 allowed_gate_digests = {
-                    "991cd5d874ac25b68142335282501e9746b6870480678a7536d38782ec63779e",
+                    "1a047f357bfa20490e35bf61f4d32c271b286cd40b3430acc20ebb17222e631f",
+                    "8c7e04e0a7acfc3877047e5e4154c3ceda231891e59c484b778051d961f77ff9",
                 }
                 if gate_exec != expected_gate_exec and exec_digest(gate_exec) not in allowed_gate_digests:
                     fail("gate execution step must match the exact strict proof command sequence")
@@ -1206,7 +1235,8 @@ if top_jobs_index is not None:
                     'echo "G-19 PASS: Execution proved ($PROOF)"',
                 ]
                 allowed_sentinel_digests = {
-                    "1acf0ea25bda4e6a90dd5eec47abdaccf9fcd0f5f7d3550147ad39390d47c38e",
+                    "e31864ca935eb2778bcae7f07bfd049524b280a7f6b29a30bf148ba5b94961da",
+                    "d511d151880b1e4cb9a7b8cd62c760a2cbc21528855fe28c151c217755aa2c3c",
                 }
                 if sentinel_exec != expected_sentinel_exec and exec_digest(sentinel_exec) not in allowed_sentinel_digests:
                     fail("sentinel step must match the exact strict proof command sequence")
