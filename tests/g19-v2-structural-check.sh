@@ -966,6 +966,14 @@ if top_jobs_index is not None:
                 ):
                     if re.fullmatch(r'[0-9a-f]{64}', sentinel_env.get(key, "")) is None:
                         fail(f"sentinel env must define {key} as a 64-hex hash")
+                for snippet in (
+                    'git cat-file blob "HEAD:tests/run-gates.sh"',
+                    'git cat-file blob "HEAD:tests/g19-v2-structural-check.sh"',
+                    'git ls-files \'tests/fixtures/g19-v2/*.yml\'',
+                    'git cat-file blob "HEAD:$fixture"',
+                ):
+                    if not any(snippet in line for line in sentinel_exec):
+                        fail(f"sentinel must compute proof material from Git blob input: {snippet}")
                 if not any(line.startswith('EXPECTED_PROOF="$(printf ') and "VT_G19_EXECUTED:%s" in line for line in sentinel_exec):
                     fail("sentinel must recompute expected VT_G19_EXEC_PROOF preimage")
 

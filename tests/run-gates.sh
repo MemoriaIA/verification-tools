@@ -36,7 +36,6 @@ mkdir "$WORK" || { echo "SETUP FAIL: could not create $WORK"; exit 2; }
 trap 'rm -rf "$WORK"' EXIT
 OUT="$WORK/out.txt"
 FAILED=0
-G19_PROOF_MATERIAL=""
 
 echo "== verification-tools gate suite =="
 echo "python:   $PY"
@@ -47,7 +46,6 @@ echo
 fail() { echo "  $1: FAIL - $2"; FAILED=1; }
 pass() {
   echo "  $1: PASS ${2:-}"
-  G19_PROOF_MATERIAL="${G19_PROOF_MATERIAL}PASS|${1}|${2:-}"$'\n'
 }
 
 assert_exit() { # label expected actual
@@ -494,7 +492,6 @@ for fixture in $G19_EXPECTED_FIXTURES; do
     G19_FIXTURE_MISSING=1
   else
     fixture_sha="$(sha256sum "$fixture_path" | awk '{print $1}')"
-    G19_PROOF_MATERIAL="${G19_PROOF_MATERIAL}FIXTURE|${fixture}|${fixture_sha}"$'\n'
   fi
 done
 
@@ -535,9 +532,20 @@ echo
 if [ "$FAILED" -eq 0 ]; then
   echo "ALL GATES PASS"
   HEAD_SHA="$(git rev-parse HEAD 2>/dev/null || printf 'unknown')"
-  RUN_GATES_SHA="$(sha256sum tests/run-gates.sh | awk '{print $1}')"
-  STRUCTURAL_CHECK_SHA="$(sha256sum tests/g19-v2-structural-check.sh | awk '{print $1}')"
-  G19_FIXTURE_MANIFEST_SHA="$(git ls-files -z 'tests/fixtures/g19-v2/*.yml' | xargs -0 sha256sum | sha256sum | awk '{print $1}')"
+  tracked_blob_sha256() {
+    git cat-file blob "HEAD:$1" | sha256sum | awk '{print $1}'
+  }
+  fixture_manifest_sha256() {
+    git ls-files 'tests/fixtures/g19-v2/*.yml' |
+      while IFS= read -r fixture; do
+        printf '%s  %s\n' "$(tracked_blob_sha256 "$fixture")" "$fixture"
+      done |
+      sha256sum |
+      awk '{print $1}'
+  }
+  RUN_GATES_SHA="$(tracked_blob_sha256 "tests/run-gates.sh")"
+  STRUCTURAL_CHECK_SHA="$(tracked_blob_sha256 "tests/g19-v2-structural-check.sh")"
+  G19_FIXTURE_MANIFEST_SHA="$(fixture_manifest_sha256)"
   VT_G19_EXEC_PROOF="$(
     printf 'VT_G19_EXECUTED:%s\nRUN_GATES:%s\nSTRUCTURAL:%s\nFIXTURES:%s\n' \
       "$HEAD_SHA" "$RUN_GATES_SHA" "$STRUCTURAL_CHECK_SHA" "$G19_FIXTURE_MANIFEST_SHA" |

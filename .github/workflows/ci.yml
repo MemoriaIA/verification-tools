@@ -75,25 +75,25 @@ jobs:
       - name: G-19 CI anti-theater (run-gates execution proof required)
         if: always()
         env:
-          VT_G19_EXPECTED_RUN_GATES_SHA: "102abbfb0e4bd8e95921d8ac5e338251c9a1999431a0a7db5e49177b2ac3a938"
-          VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA: "e2a48bbc5b63a76dca82c4dff22128c685da00184938c30f24540b3025bee4b7"
-          VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA: "319860e90b203eb5cc492dd219065b4e76fb94d11af08d5efc7e8f05d6caea0a"
+          VT_G19_EXPECTED_RUN_GATES_SHA: "0e3c80877566853c0ef0c353c39eae98e035b91054e4df35bf852987c0050d3e"
+          VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA: "17b7f9994bbf53ac00db549ecce21810552a154ebc5989334ae39005e8bfa3d0"
+          VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA: "2f69f91b5b57c8b93c214dc8711d89c38ec9ae7f4e72e1dba96b84e69b8dad36"
         run: |
           if [ "${{ steps.run_gates.outcome }}" != "success" ]; then
             echo "G-19 FAIL: tests/run-gates.sh did not complete successfully (outcome: ${{ steps.run_gates.outcome }})"
             exit 1
           fi
-          RUN_GATES_SHA="$(sha256sum tests/run-gates.sh | awk '{print $1}')"
+          RUN_GATES_SHA="$(git cat-file blob "HEAD:tests/run-gates.sh" | sha256sum | awk '{print $1}')"
           if [ "$RUN_GATES_SHA" != "$VT_G19_EXPECTED_RUN_GATES_SHA" ]; then
             echo "G-19 FAIL: tests/run-gates.sh hash mismatch ($RUN_GATES_SHA)"
             exit 1
           fi
-          STRUCTURAL_CHECK_SHA="$(sha256sum tests/g19-v2-structural-check.sh | awk '{print $1}')"
+          STRUCTURAL_CHECK_SHA="$(git cat-file blob "HEAD:tests/g19-v2-structural-check.sh" | sha256sum | awk '{print $1}')"
           if [ "$STRUCTURAL_CHECK_SHA" != "$VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA" ]; then
             echo "G-19 FAIL: tests/g19-v2-structural-check.sh hash mismatch ($STRUCTURAL_CHECK_SHA)"
             exit 1
           fi
-          FIXTURE_MANIFEST_SHA="$(git ls-files -z 'tests/fixtures/g19-v2/*.yml' | xargs -0 sha256sum | sha256sum | awk '{print $1}')"
+          FIXTURE_MANIFEST_SHA="$(git ls-files 'tests/fixtures/g19-v2/*.yml' | while IFS= read -r fixture; do fixture_sha="$(git cat-file blob "HEAD:$fixture" | sha256sum | awk '{print $1}')"; printf '%s  %s\n' "$fixture_sha" "$fixture"; done | sha256sum | awk '{print $1}')"
           if [ "$FIXTURE_MANIFEST_SHA" != "$VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA" ]; then
             echo "G-19 FAIL: G-19 fixture manifest hash mismatch ($FIXTURE_MANIFEST_SHA)"
             exit 1
