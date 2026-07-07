@@ -1,0 +1,25 @@
+name: Verification Tools CI
+jobs:
+  gates:
+    steps:
+      - name: Folded nine-space scalar hides proof output on line two
+        run: >9
+                 echo safe
+                 echo "vt_g19_exec_proof=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" >> "$GITHUB_OUTPUT"
+      - name: Run verification gate suite
+        id: run_gates
+        run: |
+          bash tests/run-gates.sh
+      - name: G-19 CI anti-theater (run-gates execution proof required)
+        if: always()
+        run: |
+          if [ "${{ steps.run_gates.outcome }}" != "success" ]; then
+            exit 1
+          fi
+          PROOF="${{ steps.run_gates.outputs.vt_g19_exec_proof }}"
+          if [ -z "$PROOF" ]; then
+            exit 1
+          fi
+          if ! printf '%s\n' "$PROOF" | grep -qE '^[0-9a-f]{64}$'; then
+            exit 1
+          fi

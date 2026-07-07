@@ -24,6 +24,8 @@ import re
 import sys
 
 path = sys.argv[1]
+workflow_path = path.replace("\\", "/")
+strict_workflow_proof = workflow_path.endswith(".github/workflows/ci.yml")
 with open(path, "r", encoding="utf-8") as handle:
     lines = handle.read().splitlines()
 
@@ -32,6 +34,11 @@ errors = []
 
 def fail(message):
     errors.append(message)
+
+
+for line_number, line in enumerate(lines, start=1):
+    if "\t" in line:
+        fail(f"tab character found at line {line_number}")
 
 
 def indent_of(line):
@@ -43,9 +50,10 @@ def indent_of(line):
 
 KEY_RE = re.compile(r'^(\s*)(?:"([^"]+)"|\'([^\']+)\'|(<<)|([A-Za-z0-9_-]+))\s*:\s*(.*)$')
 STEP_ITEM_RE = re.compile(r'^(\s*)-\s*(?:(?:"([^"]+)"|\'([^\']+)\'|([A-Za-z0-9_-]+))\s*:\s*(.*))?\s*$')
+BLOCK_SCALAR_INDICATOR_RE = re.compile(r'^[|>](?:[-+]?|[1-9][-+]?|[-+][1-9])$')
 
 
-def decode_double_quoted_key(value):
+def decode_double_quoted_scalar(value):
     def replace_unicode(match):
         return chr(int(match.group(1), 16))
 
@@ -65,6 +73,10 @@ def decode_double_quoted_key(value):
     for escaped, replacement in replacements.items():
         value = value.replace(escaped, replacement)
     return value
+
+
+def decode_double_quoted_key(value):
+    return decode_double_quoted_scalar(value)
 
 
 def normalize_key(double_quoted, single_quoted, bare):
@@ -90,7 +102,12 @@ def parse_key(line):
 
 def scalar_value(value):
     bare = value.split("#", 1)[0].strip()
-    return bare in {"|", ">", "|-", ">-", "|+", ">+"}
+    return BLOCK_SCALAR_INDICATOR_RE.match(bare) is not None
+
+
+def invalid_block_scalar_indicator(value):
+    bare = value.split("#", 1)[0].strip()
+    return bare.startswith(("|", ">")) and BLOCK_SCALAR_INDICATOR_RE.match(bare) is None
 
 
 def scalar_style(value):
@@ -154,10 +171,14 @@ def scalar_line_mask():
                 continue
             active_indent = None
         parsed = parse_key(line)
+        if parsed and invalid_block_scalar_indicator(parsed["value"]):
+            fail(f"invalid YAML block scalar indicator at line {index + 1}")
         if parsed and scalar_value(parsed["value"]):
             active_indent = parsed["indent"]
             continue
         item = STEP_ITEM_RE.match(line)
+        if item and invalid_block_scalar_indicator((item.group(5) or "").strip()):
+            fail(f"invalid YAML block scalar indicator at line {index + 1}")
         if item and scalar_value((item.group(5) or "").strip()):
             active_indent = len(item.group(1)) + 2
     return mask
@@ -247,6 +268,84 @@ def collect_run_lines(run_index, run_indent):
     return collected
 
 
+def unescaped_quote_count(value):
+    count = 0
+    escaped = False
+    for char in value:
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == '"':
+            count += 1
+    return count
+
+
+def single_quote_count(value):
+    count = 0
+    index = 0
+    while index < len(value):
+        if value[index] != "'":
+            index += 1
+            continue
+        if index + 1 < len(value) and value[index + 1] == "'":
+            index += 2
+            continue
+        count += 1
+        index += 1
+    return count
+
+
+def quoted_content(value, quote):
+    start = value.find(quote)
+    if start < 0:
+        return value
+    escaped = False
+    for index in range(start + 1, len(value)):
+        char = value[index]
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\" and quote == '"':
+            escaped = True
+            continue
+        if char == quote:
+            return value[start + 1:index]
+    return value[start + 1:]
+
+
+def collect_inline_run_lines(run_index, run_indent, value):
+    raw = value.strip()
+    if not raw:
+        return []
+    def continuation_parts(stop_when_closed=None):
+        parts = []
+        index = run_index + 1
+        while index < len(lines):
+            if lines[index].strip() and not SCALAR_LINES[index] and indent_of(lines[index]) <= run_indent:
+                break
+            cut = min(len(lines[index]), run_indent + 2)
+            parts.append(lines[index][cut:] if len(lines[index]) >= cut else "")
+            if stop_when_closed is not None and stop_when_closed(" ".join([raw] + parts)):
+                break
+            index += 1
+        return parts
+    if raw.startswith('"'):
+        parts = [raw]
+        if unescaped_quote_count(raw) < 2:
+            parts.extend(continuation_parts(lambda text: unescaped_quote_count(text) >= 2))
+        return [decode_double_quoted_scalar(quoted_content(" ".join(part.strip() for part in parts), '"'))]
+    if raw.startswith("'"):
+        parts = [raw]
+        if single_quote_count(raw) < 2:
+            parts.extend(continuation_parts(lambda text: single_quote_count(text) >= 2))
+        return [quoted_content(" ".join(part.strip() for part in parts), "'").replace("''", "'")]
+    parts = [raw] + continuation_parts()
+    return [strip_quotes(" ".join(part.strip() for part in parts))]
+
+
 def parse_steps(steps_index, steps_end):
     steps = []
     index = steps_index + 1
@@ -254,10 +353,16 @@ def parse_steps(steps_index, steps_end):
         if SCALAR_LINES[index]:
             index += 1
             continue
+        stripped = lines[index].strip()
+        if re.match(r'^-\s*<<\s*:', stripped):
+            fail("jobs.gates.steps must not use YAML merge keys")
+            index += 1
+            continue
         item = parse_step_item(lines[index])
         if not item or item["indent"] != 6:
-            stripped = lines[index].strip()
-            if stripped.startswith("- {") or stripped.startswith("- ["):
+            if re.match(r'^-\s*[&*]', stripped):
+                fail("jobs.gates.steps must not use YAML anchors or aliases")
+            elif re.match(r'^-\s*(?:&[A-Za-z0-9_-]+\s+)?[\{\[]', stripped):
                 fail("jobs.gates.steps must not use flow-style step items")
             index += 1
             continue
@@ -303,6 +408,9 @@ def parse_step_item(line):
 
 
 def record_step_key(step, key, value, index, effective_indent):
+    if key == "<<":
+        fail("jobs.gates.steps must not use YAML merge keys")
+        return
     if key == "name":
         step["name"] = strip_quotes(value)
     else:
@@ -310,11 +418,13 @@ def record_step_key(step, key, value, index, effective_indent):
         step["key_indexes"].setdefault(key, []).append(index)
         step["key_counts"][key] = step["key_counts"].get(key, 0) + 1
         if key == "run":
+            if re.match(r'^[&*]', value.strip()):
+                fail("jobs.gates run values must not use YAML anchors or aliases")
             step["run_style"] = scalar_style(value)
             if scalar_value(value):
                 step["run_lines"] = collect_run_lines(index, effective_indent)
             elif value:
-                step["run_lines"] = [strip_quotes(value)]
+                step["run_lines"] = collect_inline_run_lines(index, effective_indent, value)
             else:
                 step["run_lines"] = []
 
@@ -393,31 +503,81 @@ def contains_unsupported_sentinel_control(exec_lines):
 PROOF_ASSIGNMENT_PATTERN = re.compile(r'^PROOF="\$\{\{\s*steps\.run_gates\.outputs\.vt_g19_exec_proof\s*\}\}"$')
 
 
+def normalize_shell_escapes(code):
+    return re.sub(r'\\([A-Za-z0-9_./:=@%+\-])', r'\1', code)
+
+
+def decode_ansi_c_escape_payload(value):
+    def replace_hex(match):
+        return chr(int(match.group(1), 16))
+
+    value = re.sub(r'\\x([0-9A-Fa-f]{2})', replace_hex, value)
+    value = re.sub(r'\\u([0-9A-Fa-f]{4})', replace_hex, value)
+    value = re.sub(r'\\U([0-9A-Fa-f]{8})', replace_hex, value)
+    replacements = {
+        r'\a': '\a',
+        r'\b': '\b',
+        r'\e': '\x1b',
+        r'\E': '\x1b',
+        r'\f': '\f',
+        r'\n': '\n',
+        r'\r': '\r',
+        r'\t': '\t',
+        r'\v': '\v',
+        r'\\': '\\',
+        r"\'": "'",
+        r'\"': '"',
+    }
+    for escaped, replacement in replacements.items():
+        value = value.replace(escaped, replacement)
+    return value
+
+
+def decode_ansi_c_quotes(code):
+    return re.sub(
+        r"\$'((?:\\.|[^'])*)'",
+        lambda match: decode_ansi_c_escape_payload(match.group(1)),
+        code,
+    )
+
+
+def normalize_shell_words(code):
+    normalized = decode_ansi_c_quotes(code)
+    normalized = normalize_shell_escapes(normalized)
+    normalized = re.sub(r'\$"([^"]*)"', r"\1", normalized)
+    normalized = normalized.replace("'", "").replace('"', "")
+    return normalized
+
+
 def proof_mutation_lines(exec_lines):
     mutations = []
     for line in exec_lines:
         code = line.split("#", 1)[0].strip()
         if not code or PROOF_ASSIGNMENT_PATTERN.match(code):
             continue
-        if re.search(r'(^|[;&|]\s*)(\\?(builtin|command)\s+)?\\?(declare|local|typeset)\b[^#;&|]*(^|[\s;])-[-A-Za-z]*n[-A-Za-z]*(\s|$)', code):
+        normalized = normalize_shell_words(code)
+        if re.search(r'(^|[;&|]\s*)(?:(?:builtin|command)\s+)*(declare|local|typeset)\b', normalized) and re.search(r'(^|[\s;])-\$\{?[A-Za-z_][A-Za-z0-9_]*\}?', normalized):
             mutations.append(line)
             continue
-        if re.search(r'\$\{PROOF(?::[-=]|=)', code):
+        if re.search(r'(^|[;&|]\s*)(?:(?:builtin|command)\s+)*(declare|local|typeset)\b[^#;&|]*(^|[\s;])-[-A-Za-z]*n[-A-Za-z]*(\s|$)', normalized):
             mutations.append(line)
             continue
-        if re.match(r'^(declare|local|typeset)\b', code) and re.search(r'(^|[\s;])-[-A-Za-z]*n[-A-Za-z]*(\s|$)', code):
+        if re.search(r'\$\{PROOF(?::[-=]|=)', normalized):
             mutations.append(line)
             continue
-        if re.match(r'^PROOF(\+)?=', code) or re.match(r'^PROOF\[[^]]+\](\+)?=', code):
+        if re.match(r'^(declare|local|typeset)\b', normalized) and re.search(r'(^|[\s;])-[-A-Za-z]*n[-A-Za-z]*(\s|$)', normalized):
             mutations.append(line)
             continue
-        if re.match(r'^(declare|local|typeset|export|readonly)\b.*(^|[\s;])PROOF(\b|=)', code):
+        if re.match(r'^PROOF(\+)?=', normalized) or re.match(r'^PROOF\[[^]]+\](\+)?=', normalized):
             mutations.append(line)
             continue
-        if re.match(r'^unset\b.*(^|[\s;])PROOF\b', code):
+        if re.match(r'^(declare|local|typeset|export|readonly)\b.*(^|[\s;])PROOF(\b|=)', normalized):
             mutations.append(line)
             continue
-        if re.search(r'\b(read|printf\s+-v|eval)\b.*\bPROOF\b', code):
+        if re.match(r'^unset\b.*(^|[\s;])PROOF\b', normalized):
+            mutations.append(line)
+            continue
+        if re.search(r'\b(read|printf\s+-v|eval)\b.*\bPROOF\b', normalized):
             mutations.append(line)
     return mutations
 
@@ -498,10 +658,25 @@ def inspect_env_block(env_index, env_indent, context):
         env_key = parsed["key"].upper()
         if env_key in FORBIDDEN_ENV_KEYS:
             fail(f"{context}.env must not define {env_key}")
+        if re.match(r'^BASH_FUNC_.*%%$', env_key):
+            fail(f"{context}.env must not define Bash function export key {env_key}")
+
+
+def step_env_values(step):
+    values = {}
+    for env_index in step["key_indexes"].get("env", []):
+        env_end = block_end(env_index, 8, SCALAR_LINES)
+        for index in range(env_index + 1, env_end):
+            if SCALAR_LINES[index]:
+                continue
+            parsed = parse_key(lines[index])
+            if parsed and parsed["indent"] == 10:
+                values[parsed["key"]] = strip_quotes(parsed["value"])
+    return values
 
 
 def writes_execution_proof_output(run_lines):
-    code_lines = [line.split("#", 1)[0] for line in executable_lines(run_lines)]
+    code_lines = [normalize_shell_words(line.split("#", 1)[0]) for line in executable_lines(run_lines)]
     joined = "\n".join(code_lines)
     lowered = joined.lower()
     proof_key_present = (
@@ -568,10 +743,24 @@ def allowed_github_path_write(step, code):
 
 
 def forbidden_environment_mutation(step):
-    code_lines = [line.split("#", 1)[0].strip() for line in executable_lines(step["run_lines"])]
+    raw_code_lines = [line.split("#", 1)[0].strip() for line in executable_lines(step["run_lines"])]
+    code_lines = [normalize_shell_words(line) for line in raw_code_lines]
     for line in executable_lines(step["run_lines"]):
-        code = line.split("#", 1)[0].strip()
-        if re.search(r'(^|[^A-Za-z0-9_])\\?eval\b', code):
+        if "\t" in line:
+            return "tab-indented shell text"
+        raw_code = line.split("#", 1)[0].strip()
+        code = normalize_shell_words(raw_code)
+        if re.search(r'(^|[^A-Za-z0-9_])eval\b', code):
+            return "computed environment file"
+        if re.search(r'(^|[;&|]\s*)\$\{?[A-Za-z_][A-Za-z0-9_]*\}?(?=\s|$)', code):
+            return "computed environment file"
+        if re.search(r'(^|[;&|]\s*)env\b[^#;&|]*\s(?:/usr/bin/|/bin/)?(bash|sh|dash|zsh|ksh)\s+[^#;&|]*-c(\s|$)', code):
+            return "computed environment file"
+        if re.search(r'(^|[;&|]\s*)(?:/usr/bin/|/bin/)?(bash|sh|dash|zsh|ksh)\s+[^#;&|]*-c(\s|$)', code):
+            return "computed environment file"
+        if re.search(r'(^|[;&|]\s*)(bash|sh|dash|zsh|ksh)\s+[^#;&|]*-c(\s|$)', code):
+            return "computed environment file"
+        if re.search(r'(^|[;&|]\s*)(python[0-9.]*|node|perl|ruby|php)\s+[^#;&|]*(?:-c|-e|-r)(\s|$)', code):
             return "computed environment file"
         if "GITHUB_ENV" in code:
             return "GITHUB_ENV"
@@ -579,8 +768,8 @@ def forbidden_environment_mutation(step):
             return "BASH_ENV"
         if re.search(r'(^|[\s;])(export\s+)?(BASH_ENV|PATH|PYTHON|PYTHONPATH)=', code):
             return "shell environment"
-        if "GITHUB_PATH" in code:
-            if allowed_github_path_write(step, code):
+        if "GITHUB_PATH" in raw_code or "GITHUB_PATH" in code:
+            if allowed_github_path_write(step, raw_code):
                 continue
             return "GITHUB_PATH"
     joined = "\n".join(code_lines)
@@ -595,9 +784,9 @@ def forbidden_environment_mutation(step):
             or ("bash" in lowered and has_env_fragment)
         )
     )
-    if has_env_file_fragments and not any(allowed_github_path_write(step, code) for code in code_lines):
+    if has_env_file_fragments and not any(allowed_github_path_write(step, code) for code in raw_code_lines):
         return "environment file"
-    if not any(allowed_github_path_write(step, code) for code in code_lines):
+    if not any(allowed_github_path_write(step, code) for code in raw_code_lines):
         has_append = ">>" in joined or "out-file" in lowered
         has_indirect_lookup = (
             "printenv" in lowered
@@ -719,6 +908,16 @@ if top_jobs_index is not None:
                 fail("gate run block must contain exactly one executable line: bash tests/run-gates.sh")
             if any(contains_neutralizer(line) for line in gate_exec):
                 fail("gate execution step contains gate-neutralizing pattern(s)")
+            if strict_workflow_proof:
+                gate_env = step_env_values(gate)
+                expected_event_env = {
+                    "VT_G19_PR_HEAD_SHA": "${{ github.event.pull_request.head.sha || github.sha }}",
+                    "VT_G19_PR_BASE_SHA": "${{ github.event.pull_request.base.sha || github.event.before || github.sha }}",
+                    "VT_G19_CHECKOUT_SHA": "${{ github.sha }}",
+                }
+                for key, expected_value in expected_event_env.items():
+                    if gate_env.get(key) != expected_value:
+                        fail(f"gate execution step env must define {key} from GitHub event context")
 
         if len(sentinel_steps) == 1:
             sentinel = sentinel_steps[0]
@@ -757,9 +956,56 @@ if top_jobs_index is not None:
             outcome_pattern = re.compile(r'^if \[ "\$\{\{\s*steps\.run_gates\.outcome\s*\}\}" != "success" \]; then$')
             missing_pattern = re.compile(r'^if \[ -z "\$PROOF" \]; then$')
             invalid_pattern = re.compile(r"^if ! printf '%s\\n' \"\$PROOF\" \| grep -qE '\^\[0-9a-f\]\{64\}\$'; then$")
+            pr_head_sha_pattern = re.compile(r"^if ! printf '%s\\n' \"\$VT_G19_PR_HEAD_SHA\" \| grep -qE '\^\[0-9a-f\]\{40\}\$'; then$")
+            pr_base_sha_pattern = re.compile(r"^if ! printf '%s\\n' \"\$VT_G19_PR_BASE_SHA\" \| grep -qE '\^\[0-9a-f\]\{40\}\$'; then$")
+            checkout_sha_pattern = re.compile(r"^if ! printf '%s\\n' \"\$VT_G19_CHECKOUT_SHA\" \| grep -qE '\^\[0-9a-f\]\{40\}\$'; then$")
+            checkout_match_pattern = re.compile(r'^if \[ "\$CHECKOUT_SHA" != "\$VT_G19_CHECKOUT_SHA" \]; then$')
+            run_gates_hash_pattern = re.compile(r'^if \[ "\$RUN_GATES_SHA" != "\$VT_G19_EXPECTED_RUN_GATES_SHA" \]; then$')
+            structural_hash_pattern = re.compile(r'^if \[ "\$STRUCTURAL_CHECK_SHA" != "\$VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA" \]; then$')
+            fixture_hash_pattern = re.compile(r'^if \[ "\$FIXTURE_MANIFEST_SHA" != "\$VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA" \]; then$')
+            proof_preimage_pattern = re.compile(r'^if \[ "\$PROOF" != "\$EXPECTED_PROOF" \]; then$')
             require_top_level_branch(sentinel_exec, outcome_pattern, "steps.run_gates.outcome")
             require_top_level_branch(sentinel_exec, missing_pattern, "missing execution proof")
             require_top_level_branch(sentinel_exec, invalid_pattern, "invalid execution proof")
+            if strict_workflow_proof:
+                require_top_level_branch(sentinel_exec, pr_head_sha_pattern, "PR head SHA")
+                require_top_level_branch(sentinel_exec, pr_base_sha_pattern, "PR base SHA")
+                require_top_level_branch(sentinel_exec, checkout_sha_pattern, "checkout SHA")
+                require_top_level_branch(sentinel_exec, checkout_match_pattern, "checked-out SHA")
+                require_top_level_branch(sentinel_exec, run_gates_hash_pattern, "tests/run-gates.sh content hash")
+                require_top_level_branch(sentinel_exec, structural_hash_pattern, "tests/g19-v2-structural-check.sh content hash")
+                require_top_level_branch(sentinel_exec, fixture_hash_pattern, "G-19 fixture manifest hash")
+                require_top_level_branch(sentinel_exec, proof_preimage_pattern, "execution proof preimage")
+                sentinel_env = step_env_values(sentinel)
+                expected_event_env = {
+                    "VT_G19_PR_HEAD_SHA": "${{ github.event.pull_request.head.sha || github.sha }}",
+                    "VT_G19_PR_BASE_SHA": "${{ github.event.pull_request.base.sha || github.event.before || github.sha }}",
+                    "VT_G19_CHECKOUT_SHA": "${{ github.sha }}",
+                }
+                for key, expected_value in expected_event_env.items():
+                    if sentinel_env.get(key) != expected_value:
+                        fail(f"sentinel env must define {key} from GitHub event context")
+                for key in (
+                    "VT_G19_EXPECTED_RUN_GATES_SHA",
+                    "VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA",
+                    "VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA",
+                ):
+                    if re.fullmatch(r'[0-9a-f]{64}', sentinel_env.get(key, "")) is None:
+                        fail(f"sentinel env must define {key} as a 64-hex hash")
+                for snippet in (
+                    'git cat-file blob "HEAD:tests/run-gates.sh"',
+                    'git cat-file blob "HEAD:tests/g19-v2-structural-check.sh"',
+                    'git ls-files \'tests/fixtures/g19-v2/*.yml\'',
+                    'git cat-file blob "HEAD:$fixture"',
+                ):
+                    if not any(snippet in line for line in sentinel_exec):
+                        fail(f"sentinel must compute proof material from Git blob input: {snippet}")
+                expected_proof_lines = [line for line in sentinel_exec if line.startswith('EXPECTED_PROOF="$(printf ')]
+                if not expected_proof_lines or "VT_G19_EXECUTED:v2" not in expected_proof_lines[0]:
+                    fail("sentinel must recompute v2 VT_G19_EXEC_PROOF preimage")
+                for snippet in ("PR_HEAD:%s", "PR_BASE:%s", "CHECKOUT:%s", "RUN_GATES:%s", "STRUCTURAL:%s", "FIXTURES:%s"):
+                    if not any(snippet in line for line in expected_proof_lines):
+                        fail(f"sentinel proof preimage must include {snippet}")
 
 if errors:
     for error in errors:
