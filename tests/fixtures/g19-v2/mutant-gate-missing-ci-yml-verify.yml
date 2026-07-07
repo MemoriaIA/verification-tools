@@ -1,0 +1,43 @@
+name: Verification Tools CI
+jobs:
+  gates:
+    steps:
+      - name: Run verification gate suite
+        id: run_gates
+        env:
+          VT_G19_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          VT_G19_PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+          VT_G19_CHECKOUT_SHA: ${{ github.sha }}
+        run: |
+          ROOT_WORKSPACE="$PWD"
+          MATERIALIZED_WORKTREE="$(mktemp -d)"
+          cleanup_materialized_worktree() {
+            cd "$ROOT_WORKSPACE"
+            git worktree remove --force "$MATERIALIZED_WORKTREE" >/dev/null 2>&1 || rm -rf "$MATERIALIZED_WORKTREE"
+          }
+          trap cleanup_materialized_worktree EXIT
+          git worktree add --detach "$MATERIALIZED_WORKTREE" "$VT_G19_CHECKOUT_SHA"
+          cd "$MATERIALIZED_WORKTREE"
+          source tests/lib/verify-tracked-workspace.sh
+          verify_tracked_workspace_file tests/lib/verify-tracked-workspace.sh
+          verify_tracked_workspace_file tests/run-gates.sh
+          verify_tracked_workspace_file tests/g19-v2-structural-check.sh
+          verify_tracked_workspace_file memoriaia/verify/verify-hashchain.py
+          verify_tracked_workspace_file verify/verify-hashchain.sh
+          git ls-files 'tests/fixtures/g19-v2/*.yml' | while IFS= read -r fixture; do
+            verify_tracked_workspace_file "$fixture"
+          done
+          bash tests/run-gates.sh
+      - name: G-19 CI anti-theater (run-gates execution proof required)
+        if: always()
+        run: |
+          if [ "${{ steps.run_gates.outcome }}" != "success" ]; then
+            exit 1
+          fi
+          PROOF="${{ steps.run_gates.outputs.vt_g19_exec_proof }}"
+          if [ -z "$PROOF" ]; then
+            exit 1
+          fi
+          if ! printf '%s\n' "$PROOF" | grep -qE '^[0-9a-f]{64}$'; then
+            exit 1
+          fi

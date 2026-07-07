@@ -217,6 +217,13 @@ top_env = [
     and parsed["key"] == "env"
 ]
 
+for index, line in enumerate(lines):
+    if SCALAR_LINES[index]:
+        continue
+    parsed = parse_key(line)
+    if parsed and parsed["key"] == "workflow_dispatch":
+        fail("workflow_dispatch must not be enabled for the required G-19 proof workflow")
+
 if len(top_jobs) != 1:
     fail(f"expected exactly one top-level jobs: key, found {len(top_jobs)}")
     top_jobs_index = None
@@ -316,6 +323,25 @@ def quoted_content(value, quote):
     return value[start + 1:]
 
 
+def single_quoted_content(value):
+    start = value.find("'")
+    if start < 0:
+        return value
+    result = []
+    index = start + 1
+    while index < len(value):
+        char = value[index]
+        if char == "'":
+            if index + 1 < len(value) and value[index + 1] == "'":
+                result.append("'")
+                index += 2
+                continue
+            return "".join(result)
+        result.append(char)
+        index += 1
+    return "".join(result)
+
+
 def collect_inline_run_lines(run_index, run_indent, value):
     raw = value.strip()
     if not raw:
@@ -341,7 +367,7 @@ def collect_inline_run_lines(run_index, run_indent, value):
         parts = [raw]
         if single_quote_count(raw) < 2:
             parts.extend(continuation_parts(lambda text: single_quote_count(text) >= 2))
-        return [quoted_content(" ".join(part.strip() for part in parts), "'").replace("''", "'")]
+        return [single_quoted_content(" ".join(part.strip() for part in parts))]
     parts = [raw] + continuation_parts()
     return [strip_quotes(" ".join(part.strip() for part in parts))]
 
@@ -460,6 +486,9 @@ for defaults_index in top_defaults:
         run_end = block_end(run_index, 2, SCALAR_LINES)
         reject_merge_keys(run_index, run_end, 2, "top-level defaults.run")
         shell_indexes = find_direct_child(run_index, run_end, 2, "shell")
+        workdir_indexes = find_direct_child(run_index, run_end, 2, "working-directory")
+        if workdir_indexes:
+            fail("top-level defaults.run must not define working-directory")
         for shell_index in shell_indexes:
             parsed = parse_key(lines[shell_index])
             value = strip_quotes(parsed["value"])
@@ -511,6 +540,10 @@ def decode_ansi_c_escape_payload(value):
     def replace_hex(match):
         return chr(int(match.group(1), 16))
 
+    def replace_octal(match):
+        return chr(int(match.group(1), 8))
+
+    value = re.sub(r'\\([0-7]{1,3})', replace_octal, value)
     value = re.sub(r'\\x([0-9A-Fa-f]{2})', replace_hex, value)
     value = re.sub(r'\\u([0-9A-Fa-f]{4})', replace_hex, value)
     value = re.sub(r'\\U([0-9A-Fa-f]{8})', replace_hex, value)
@@ -556,6 +589,9 @@ def proof_mutation_lines(exec_lines):
         if not code or PROOF_ASSIGNMENT_PATTERN.match(code):
             continue
         normalized = normalize_shell_words(code)
+        if re.search(r'(^|[;&|]\s*)(?:(?:builtin|command)\s+)*(declare|local|typeset)\b[^#;&|]*\$\{?[A-Za-z_][A-Za-z0-9_]*\}?[^#;&|]*\bPROOF\b', normalized):
+            mutations.append(line)
+            continue
         if re.search(r'(^|[;&|]\s*)(?:(?:builtin|command)\s+)*(declare|local|typeset)\b', normalized) and re.search(r'(^|[\s;])-\$\{?[A-Za-z_][A-Za-z0-9_]*\}?', normalized):
             mutations.append(line)
             continue
@@ -750,15 +786,38 @@ def forbidden_environment_mutation(step):
             return "tab-indented shell text"
         raw_code = line.split("#", 1)[0].strip()
         code = normalize_shell_words(raw_code)
+        protected_paths = (
+            ".github/workflows/ci.yml",
+            "tests/run-gates.sh",
+            "tests/g19-v2-structural-check.sh",
+            "tests/lib/verify-tracked-workspace.sh",
+            "memoriaia/verify/verify-hashchain.py",
+            "verify/verify-hashchain.sh",
+        )
+        for protected_path in protected_paths:
+            if protected_path in raw_code or protected_path in code:
+                if re.search(r'(^|[;&|]\s*)(cp|mv|install)\b', code):
+                    return "tracked gate file"
+                if re.search(r'(^|[;&|]\s*)(cat|printf|echo|tee|python[0-9.]*|node|perl|ruby|sed)\b', code) and re.search(r'(>>?|--in-place|-i\b)', code):
+                    return "tracked gate file"
+        if step["name"] not in {GATE_STEP_NAME, SENTINEL_STEP_NAME}:
+            if re.search(r'(^|[;&|]\s*)git\s+(checkout|switch|reset|clean|restore|update-ref|worktree|clone|fetch|pull|merge|rebase|submodule|apply|am|commit|add|rm|mv)\b', code):
+                return "git checkout state"
+            if "$(" in raw_code or "`" in raw_code:
+                return "computed environment file"
+            if re.search(r'(^|[;&|]\s*)(source|\.)\s+', code):
+                return "computed environment file"
+            if re.search(r'(^|[;&|]\s*)(?:/usr/bin/|/bin/)?(bash|sh|dash|zsh|ksh)\s+[^#;&|]*<\(', code):
+                return "computed environment file"
         if re.search(r'(^|[^A-Za-z0-9_])eval\b', code):
             return "computed environment file"
         if re.search(r'(^|[;&|]\s*)\$\{?[A-Za-z_][A-Za-z0-9_]*\}?(?=\s|$)', code):
             return "computed environment file"
-        if re.search(r'(^|[;&|]\s*)env\b[^#;&|]*\s(?:/usr/bin/|/bin/)?(bash|sh|dash|zsh|ksh)\s+[^#;&|]*-c(\s|$)', code):
+        if re.search(r'(^|[;&|]\s*)env\b[^#;&|]*\s(?:/usr/bin/|/bin/)?(bash|sh|dash|zsh|ksh)\s+[^#;&|]*-[A-Za-z]*c[A-Za-z]*(\s|$)', code):
             return "computed environment file"
-        if re.search(r'(^|[;&|]\s*)(?:/usr/bin/|/bin/)?(bash|sh|dash|zsh|ksh)\s+[^#;&|]*-c(\s|$)', code):
+        if re.search(r'(^|[;&|]\s*)(?:/usr/bin/|/bin/)?(bash|sh|dash|zsh|ksh)\s+[^#;&|]*-[A-Za-z]*c[A-Za-z]*(\s|$)', code):
             return "computed environment file"
-        if re.search(r'(^|[;&|]\s*)(bash|sh|dash|zsh|ksh)\s+[^#;&|]*-c(\s|$)', code):
+        if re.search(r'(^|[;&|]\s*)(bash|sh|dash|zsh|ksh)\s+[^#;&|]*-[A-Za-z]*c[A-Za-z]*(\s|$)', code):
             return "computed environment file"
         if re.search(r'(^|[;&|]\s*)(python[0-9.]*|node|perl|ruby|php)\s+[^#;&|]*(?:-c|-e|-r)(\s|$)', code):
             return "computed environment file"
@@ -838,6 +897,8 @@ if top_jobs_index is not None:
         for _, key, _ in gate_controls:
             if key in {"if", "continue-on-error", "needs"}:
                 fail(f"job-level {key} found on gates job")
+            if key == "working-directory":
+                fail("job-level working-directory found on gates job")
 
         env_indexes = [index for index, key, _ in gate_controls if key == "env"]
         for env_index in env_indexes:
@@ -858,6 +919,9 @@ if top_jobs_index is not None:
                 run_end = block_end(run_index, 6, SCALAR_LINES)
                 reject_merge_keys(run_index, run_end, 6, "jobs.gates.defaults.run")
                 shell_indexes = find_direct_child(run_index, run_end, 6, "shell")
+                workdir_indexes = find_direct_child(run_index, run_end, 6, "working-directory")
+                if workdir_indexes:
+                    fail("jobs.gates.defaults.run must not define working-directory")
                 for shell_index in shell_indexes:
                     parsed = parse_key(lines[shell_index])
                     value = strip_quotes(parsed["value"])
@@ -876,6 +940,8 @@ if top_jobs_index is not None:
 
         for step in steps:
             inspect_uses_step(step)
+            if "working-directory" in step["keys"]:
+                fail(f"workflow step {step['name']} must not define working-directory")
             for env_index in step["key_indexes"].get("env", []):
                 inspect_env_block(env_index, 8, f"step {step['name']}")
             if writes_execution_proof_output(step["run_lines"]):
@@ -902,13 +968,73 @@ if top_jobs_index is not None:
                 fail("gate execution step must not define continue-on-error")
             if "shell" in gate["keys"] and strip_quotes(gate["keys"]["shell"]) != "bash":
                 fail("gate execution step shell must be exactly bash when present")
+            if "working-directory" in gate["keys"]:
+                fail("gate execution step must not define working-directory")
             if gate["run_style"] == ">":
                 fail("folded scalar run: > found on gate execution step")
-            if gate_exec != ["bash tests/run-gates.sh"]:
-                fail("gate run block must contain exactly one executable line: bash tests/run-gates.sh")
+            if gate_exec[-1:] != ["bash tests/run-gates.sh"]:
+                fail("gate run block must end with executable line: bash tests/run-gates.sh")
             if any(contains_neutralizer(line) for line in gate_exec):
                 fail("gate execution step contains gate-neutralizing pattern(s)")
-            if strict_workflow_proof:
+            strict_gate_sequence = strict_workflow_proof or any("MATERIALIZED_WORKTREE" in line for line in gate_exec)
+            if strict_gate_sequence:
+                expected_gate_exec = [
+                    'ROOT_WORKSPACE="$PWD"',
+                    'MATERIALIZED_WORKTREE="$(mktemp -d)"',
+                    "cleanup_materialized_worktree() {",
+                    'cd "$ROOT_WORKSPACE"',
+                    'git worktree remove --force "$MATERIALIZED_WORKTREE" >/dev/null 2>&1 || rm -rf "$MATERIALIZED_WORKTREE"',
+                    "}",
+                    "trap cleanup_materialized_worktree EXIT",
+                    "git config core.autocrlf false",
+                    'git worktree add --detach "$MATERIALIZED_WORKTREE" "$VT_G19_CHECKOUT_SHA"',
+                    'cd "$MATERIALIZED_WORKTREE"',
+                    "git config core.autocrlf false",
+                    'git reset --hard "$VT_G19_CHECKOUT_SHA"',
+                    "source tests/lib/verify-tracked-workspace.sh",
+                    "verify_tracked_workspace_file .github/workflows/ci.yml",
+                    "verify_tracked_workspace_file tests/lib/verify-tracked-workspace.sh",
+                    "verify_tracked_workspace_file tests/run-gates.sh",
+                    "verify_tracked_workspace_file tests/g19-v2-structural-check.sh",
+                    "verify_tracked_workspace_file memoriaia/verify/verify-hashchain.py",
+                    "verify_tracked_workspace_file verify/verify-hashchain.sh",
+                    "git ls-files 'tests/fixtures/g19-v2/*.yml' | while IFS= read -r fixture; do",
+                    'verify_tracked_workspace_file "$fixture"',
+                    "done",
+                    "bash tests/run-gates.sh",
+                ]
+                if gate_exec != expected_gate_exec:
+                    fail("gate execution step must match the exact strict proof command sequence")
+                for snippet in (
+                    'ROOT_WORKSPACE="$PWD"',
+                    'MATERIALIZED_WORKTREE="$(mktemp -d)"',
+                    "git config core.autocrlf false",
+                    'git worktree add --detach "$MATERIALIZED_WORKTREE" "$VT_G19_CHECKOUT_SHA"',
+                    'cd "$MATERIALIZED_WORKTREE"',
+                    "git config core.autocrlf false",
+                    'git reset --hard "$VT_G19_CHECKOUT_SHA"',
+                    "source tests/lib/verify-tracked-workspace.sh",
+                    "verify_tracked_workspace_file .github/workflows/ci.yml",
+                    "verify_tracked_workspace_file tests/lib/verify-tracked-workspace.sh",
+                    "verify_tracked_workspace_file tests/run-gates.sh",
+                    "verify_tracked_workspace_file tests/g19-v2-structural-check.sh",
+                    "verify_tracked_workspace_file memoriaia/verify/verify-hashchain.py",
+                    "verify_tracked_workspace_file verify/verify-hashchain.sh",
+                    "verify_tracked_workspace_file \"$fixture\"",
+                ):
+                    if not any(snippet in line for line in gate_exec):
+                        fail(f"gate execution step must verify workspace bytes before execution: {snippet}")
+                fixture_verify_indexes = [
+                    index
+                    for index, line in enumerate(gate_exec)
+                    if 'verify_tracked_workspace_file "$fixture"' in line
+                ]
+                if not fixture_verify_indexes:
+                    fail("gate execution step must verify each fixture before execution")
+                else:
+                    last_fixture_verify_index = fixture_verify_indexes[-1]
+                    if gate_exec[last_fixture_verify_index + 1 :] != ["done", "bash tests/run-gates.sh"]:
+                        fail("gate execution step must execute run-gates immediately after final fixture verification")
                 gate_env = step_env_values(gate)
                 expected_event_env = {
                     "VT_G19_PR_HEAD_SHA": "${{ github.event.pull_request.head.sha || github.sha }}",
@@ -929,6 +1055,8 @@ if top_jobs_index is not None:
                 fail("sentinel step must not define continue-on-error")
             if "shell" in sentinel["keys"] and strip_quotes(sentinel["keys"]["shell"]) != "bash":
                 fail("sentinel step shell must be exactly bash when present")
+            if "working-directory" in sentinel["keys"]:
+                fail("sentinel step must not define working-directory")
             if sentinel["run_style"] == ">":
                 fail("folded scalar run: > found on sentinel step")
             if any("<<" in line for line in sentinel_exec):
@@ -943,6 +1071,11 @@ if top_jobs_index is not None:
                 fail("G-19 execution path contains gate-neutralizing pattern(s)")
             if any(line in {"true", ":", "exit 0"} for line in sentinel_exec):
                 fail("sentinel contains inert success command")
+            if not strict_workflow_proof and any(
+                re.search(r'(^|[;&|]\s*)(touch|cp|mv|rm|python[0-9.]*|node|perl|ruby|sed|cat|tee|bash|sh|git)\b', line)
+                for line in sentinel_exec
+            ):
+                fail("sentinel contains side-effecting command outside the proof contract")
             bad_exits = [line for line in sentinel_exec if re.match(r'^exit\b', line) and line != "exit 1"]
             if bad_exits:
                 fail("sentinel failure branches must terminate with literal exit 1")
@@ -952,7 +1085,11 @@ if top_jobs_index is not None:
                 fail("sentinel must read vt_g19_exec_proof exactly once and preserve it")
             if proof_mutation_lines(sentinel_exec):
                 fail("sentinel must not mutate PROOF after reading vt_g19_exec_proof")
-
+            expected_proof_assignments_any = [line for line in sentinel_exec if re.match(r'^EXPECTED_PROOF=', line)]
+            if len(expected_proof_assignments_any) > 1:
+                fail("sentinel must not rewrite EXPECTED_PROOF after computing it")
+            if len(expected_proof_assignments_any) == 1 and "VT_G19_EXECUTED:v4" not in expected_proof_assignments_any[0]:
+                fail("sentinel EXPECTED_PROOF must use v4 proof preimage")
             outcome_pattern = re.compile(r'^if \[ "\$\{\{\s*steps\.run_gates\.outcome\s*\}\}" != "success" \]; then$')
             missing_pattern = re.compile(r'^if \[ -z "\$PROOF" \]; then$')
             invalid_pattern = re.compile(r"^if ! printf '%s\\n' \"\$PROOF\" \| grep -qE '\^\[0-9a-f\]\{64\}\$'; then$")
@@ -962,18 +1099,112 @@ if top_jobs_index is not None:
             checkout_match_pattern = re.compile(r'^if \[ "\$CHECKOUT_SHA" != "\$VT_G19_CHECKOUT_SHA" \]; then$')
             run_gates_hash_pattern = re.compile(r'^if \[ "\$RUN_GATES_SHA" != "\$VT_G19_EXPECTED_RUN_GATES_SHA" \]; then$')
             structural_hash_pattern = re.compile(r'^if \[ "\$STRUCTURAL_CHECK_SHA" != "\$VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA" \]; then$')
+            workspace_helper_hash_pattern = re.compile(r'^if \[ "\$WORKSPACE_HELPER_SHA" != "\$VT_G19_EXPECTED_WORKSPACE_HELPER_SHA" \]; then$')
+            verify_py_hash_pattern = re.compile(r'^if \[ "\$VERIFY_PY_SHA" != "\$VT_G19_EXPECTED_VERIFY_PY_SHA" \]; then$')
+            verify_sh_hash_pattern = re.compile(r'^if \[ "\$VERIFY_SH_SHA" != "\$VT_G19_EXPECTED_VERIFY_SH_SHA" \]; then$')
             fixture_hash_pattern = re.compile(r'^if \[ "\$FIXTURE_MANIFEST_SHA" != "\$VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA" \]; then$')
             proof_preimage_pattern = re.compile(r'^if \[ "\$PROOF" != "\$EXPECTED_PROOF" \]; then$')
             require_top_level_branch(sentinel_exec, outcome_pattern, "steps.run_gates.outcome")
             require_top_level_branch(sentinel_exec, missing_pattern, "missing execution proof")
             require_top_level_branch(sentinel_exec, invalid_pattern, "invalid execution proof")
             if strict_workflow_proof:
+                expected_sentinel_exec = [
+                    'if [ "${{ steps.run_gates.outcome }}" != "success" ]; then',
+                    'echo "G-19 FAIL: tests/run-gates.sh did not complete successfully (outcome: ${{ steps.run_gates.outcome }})"',
+                    "exit 1",
+                    "fi",
+                    'if ! printf \'%s\\n\' "$VT_G19_PR_HEAD_SHA" | grep -qE \'^[0-9a-f]{40}$\'; then',
+                    'echo "G-19 FAIL: PR head SHA is invalid ($VT_G19_PR_HEAD_SHA)"',
+                    "exit 1",
+                    "fi",
+                    'if ! printf \'%s\\n\' "$VT_G19_PR_BASE_SHA" | grep -qE \'^[0-9a-f]{40}$\'; then',
+                    'echo "G-19 FAIL: PR base SHA is invalid ($VT_G19_PR_BASE_SHA)"',
+                    "exit 1",
+                    "fi",
+                    'if ! printf \'%s\\n\' "$VT_G19_CHECKOUT_SHA" | grep -qE \'^[0-9a-f]{40}$\'; then',
+                    'echo "G-19 FAIL: checkout SHA is invalid ($VT_G19_CHECKOUT_SHA)"',
+                    "exit 1",
+                    "fi",
+                    'CHECKOUT_SHA="$(git rev-parse HEAD)"',
+                    'if [ "$CHECKOUT_SHA" != "$VT_G19_CHECKOUT_SHA" ]; then',
+                    'echo "G-19 FAIL: checkout SHA mismatch (expected $VT_G19_CHECKOUT_SHA, got $CHECKOUT_SHA)"',
+                    "exit 1",
+                    "fi",
+                    'RUN_GATES_SHA="$(git cat-file blob "$CHECKOUT_SHA:tests/run-gates.sh" | sha256sum | awk \'{print $1}\')"',
+                    'if [ "$RUN_GATES_SHA" != "$VT_G19_EXPECTED_RUN_GATES_SHA" ]; then',
+                    'echo "G-19 FAIL: tests/run-gates.sh hash mismatch ($RUN_GATES_SHA)"',
+                    "exit 1",
+                    "fi",
+                    'STRUCTURAL_CHECK_SHA="$(git cat-file blob "$CHECKOUT_SHA:tests/g19-v2-structural-check.sh" | sha256sum | awk \'{print $1}\')"',
+                    'if [ "$STRUCTURAL_CHECK_SHA" != "$VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA" ]; then',
+                    'echo "G-19 FAIL: tests/g19-v2-structural-check.sh hash mismatch ($STRUCTURAL_CHECK_SHA)"',
+                    "exit 1",
+                    "fi",
+                    'WORKSPACE_HELPER_SHA="$(git cat-file blob "$CHECKOUT_SHA:tests/lib/verify-tracked-workspace.sh" | sha256sum | awk \'{print $1}\')"',
+                    'if [ "$WORKSPACE_HELPER_SHA" != "$VT_G19_EXPECTED_WORKSPACE_HELPER_SHA" ]; then',
+                    'echo "G-19 FAIL: tests/lib/verify-tracked-workspace.sh hash mismatch ($WORKSPACE_HELPER_SHA)"',
+                    "exit 1",
+                    "fi",
+                    'CI_YML_SHA="$(git cat-file blob "$CHECKOUT_SHA:.github/workflows/ci.yml" | sha256sum | awk \'{print $1}\')"',
+                    'VERIFY_PY_SHA="$(git cat-file blob "$CHECKOUT_SHA:memoriaia/verify/verify-hashchain.py" | sha256sum | awk \'{print $1}\')"',
+                    'if [ "$VERIFY_PY_SHA" != "$VT_G19_EXPECTED_VERIFY_PY_SHA" ]; then',
+                    'echo "G-19 FAIL: memoriaia/verify/verify-hashchain.py hash mismatch ($VERIFY_PY_SHA)"',
+                    "exit 1",
+                    "fi",
+                    'VERIFY_SH_SHA="$(git cat-file blob "$CHECKOUT_SHA:verify/verify-hashchain.sh" | sha256sum | awk \'{print $1}\')"',
+                    'if [ "$VERIFY_SH_SHA" != "$VT_G19_EXPECTED_VERIFY_SH_SHA" ]; then',
+                    'echo "G-19 FAIL: verify/verify-hashchain.sh hash mismatch ($VERIFY_SH_SHA)"',
+                    "exit 1",
+                    "fi",
+                    'FIXTURE_MANIFEST_SHA="$(git ls-files \'tests/fixtures/g19-v2/*.yml\' | while IFS= read -r fixture; do fixture_sha="$(git cat-file blob "$CHECKOUT_SHA:$fixture" | sha256sum | awk \'{print $1}\')"; printf \'%s  %s\\n\' "$fixture_sha" "$fixture"; done | sha256sum | awk \'{print $1}\')"',
+                    'if [ "$FIXTURE_MANIFEST_SHA" != "$VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA" ]; then',
+                    'echo "G-19 FAIL: G-19 fixture manifest hash mismatch ($FIXTURE_MANIFEST_SHA)"',
+                    "exit 1",
+                    "fi",
+                    'PROOF="${{ steps.run_gates.outputs.vt_g19_exec_proof }}"',
+                    'if [ -z "$PROOF" ]; then',
+                    'echo "G-19 FAIL: VT_G19_EXEC_PROOF is missing"',
+                    "exit 1",
+                    "fi",
+                    'if ! printf \'%s\\n\' "$PROOF" | grep -qE \'^[0-9a-f]{64}$\'; then',
+                    'echo "G-19 FAIL: VT_G19_EXEC_PROOF is invalid ($PROOF)"',
+                    "exit 1",
+                    "fi",
+                    'EXPECTED_PROOF="$(printf \'VT_G19_EXECUTED:v4\\nPR_HEAD:%s\\nPR_BASE:%s\\nCHECKOUT:%s\\nCI_YML:%s\\nRUN_GATES:%s\\nSTRUCTURAL:%s\\nWORKSPACE_HELPER:%s\\nVERIFY_PY:%s\\nVERIFY_SH:%s\\nFIXTURES:%s\\n\' "$VT_G19_PR_HEAD_SHA" "$VT_G19_PR_BASE_SHA" "$CHECKOUT_SHA" "$CI_YML_SHA" "$RUN_GATES_SHA" "$STRUCTURAL_CHECK_SHA" "$WORKSPACE_HELPER_SHA" "$VERIFY_PY_SHA" "$VERIFY_SH_SHA" "$FIXTURE_MANIFEST_SHA" | sha256sum | awk \'{print $1}\')"',
+                    'if [ "$PROOF" != "$EXPECTED_PROOF" ]; then',
+                    'echo "G-19 FAIL: VT_G19_EXEC_PROOF preimage mismatch (expected $EXPECTED_PROOF, got $PROOF)"',
+                    "exit 1",
+                    "fi",
+                    'echo "G-19 PASS: PR head $VT_G19_PR_HEAD_SHA; base $VT_G19_PR_BASE_SHA; checkout $CHECKOUT_SHA"',
+                    'echo "G-19 PASS: Execution proved ($PROOF)"',
+                ]
+                if sentinel_exec != expected_sentinel_exec:
+                    fail("sentinel step must match the exact strict proof command sequence")
+                expected_proof_assignments = [line for line in sentinel_exec if re.match(r'^EXPECTED_PROOF=', line)]
+                if len(expected_proof_assignments) != 1 or not expected_proof_assignments[0].startswith('EXPECTED_PROOF="$(printf '):
+                    fail("sentinel must compute EXPECTED_PROOF exactly once from the v4 preimage")
+                for material_key in (
+                    "CHECKOUT_SHA",
+                    "CI_YML_SHA",
+                    "RUN_GATES_SHA",
+                    "STRUCTURAL_CHECK_SHA",
+                    "WORKSPACE_HELPER_SHA",
+                    "VERIFY_PY_SHA",
+                    "VERIFY_SH_SHA",
+                    "FIXTURE_MANIFEST_SHA",
+                ):
+                    count = sum(1 for line in sentinel_exec if re.match(rf'^{material_key}=', line))
+                    if count != 1:
+                        fail(f"sentinel must assign {material_key} exactly once")
                 require_top_level_branch(sentinel_exec, pr_head_sha_pattern, "PR head SHA")
                 require_top_level_branch(sentinel_exec, pr_base_sha_pattern, "PR base SHA")
                 require_top_level_branch(sentinel_exec, checkout_sha_pattern, "checkout SHA")
                 require_top_level_branch(sentinel_exec, checkout_match_pattern, "checked-out SHA")
                 require_top_level_branch(sentinel_exec, run_gates_hash_pattern, "tests/run-gates.sh content hash")
                 require_top_level_branch(sentinel_exec, structural_hash_pattern, "tests/g19-v2-structural-check.sh content hash")
+                require_top_level_branch(sentinel_exec, workspace_helper_hash_pattern, "tests/lib/verify-tracked-workspace.sh content hash")
+                require_top_level_branch(sentinel_exec, verify_py_hash_pattern, "Python verifier content hash")
+                require_top_level_branch(sentinel_exec, verify_sh_hash_pattern, "bash verifier content hash")
                 require_top_level_branch(sentinel_exec, fixture_hash_pattern, "G-19 fixture manifest hash")
                 require_top_level_branch(sentinel_exec, proof_preimage_pattern, "execution proof preimage")
                 sentinel_env = step_env_values(sentinel)
@@ -988,22 +1219,29 @@ if top_jobs_index is not None:
                 for key in (
                     "VT_G19_EXPECTED_RUN_GATES_SHA",
                     "VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA",
+                    "VT_G19_EXPECTED_WORKSPACE_HELPER_SHA",
+                    "VT_G19_EXPECTED_VERIFY_PY_SHA",
+                    "VT_G19_EXPECTED_VERIFY_SH_SHA",
                     "VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA",
                 ):
                     if re.fullmatch(r'[0-9a-f]{64}', sentinel_env.get(key, "")) is None:
                         fail(f"sentinel env must define {key} as a 64-hex hash")
                 for snippet in (
-                    'git cat-file blob "HEAD:tests/run-gates.sh"',
-                    'git cat-file blob "HEAD:tests/g19-v2-structural-check.sh"',
+                    'git cat-file blob "$CHECKOUT_SHA:tests/run-gates.sh"',
+                    'git cat-file blob "$CHECKOUT_SHA:tests/g19-v2-structural-check.sh"',
+                    'git cat-file blob "$CHECKOUT_SHA:tests/lib/verify-tracked-workspace.sh"',
+                    'git cat-file blob "$CHECKOUT_SHA:.github/workflows/ci.yml"',
+                    'git cat-file blob "$CHECKOUT_SHA:memoriaia/verify/verify-hashchain.py"',
+                    'git cat-file blob "$CHECKOUT_SHA:verify/verify-hashchain.sh"',
                     'git ls-files \'tests/fixtures/g19-v2/*.yml\'',
-                    'git cat-file blob "HEAD:$fixture"',
+                    'git cat-file blob "$CHECKOUT_SHA:$fixture"',
                 ):
                     if not any(snippet in line for line in sentinel_exec):
                         fail(f"sentinel must compute proof material from Git blob input: {snippet}")
                 expected_proof_lines = [line for line in sentinel_exec if line.startswith('EXPECTED_PROOF="$(printf ')]
-                if not expected_proof_lines or "VT_G19_EXECUTED:v2" not in expected_proof_lines[0]:
-                    fail("sentinel must recompute v2 VT_G19_EXEC_PROOF preimage")
-                for snippet in ("PR_HEAD:%s", "PR_BASE:%s", "CHECKOUT:%s", "RUN_GATES:%s", "STRUCTURAL:%s", "FIXTURES:%s"):
+                if not expected_proof_lines or "VT_G19_EXECUTED:v4" not in expected_proof_lines[0]:
+                    fail("sentinel must recompute v4 VT_G19_EXEC_PROOF preimage")
+                for snippet in ("PR_HEAD:%s", "PR_BASE:%s", "CHECKOUT:%s", "CI_YML:%s", "RUN_GATES:%s", "STRUCTURAL:%s", "WORKSPACE_HELPER:%s", "VERIFY_PY:%s", "VERIFY_SH:%s", "FIXTURES:%s"):
                     if not any(snippet in line for line in expected_proof_lines):
                         fail(f"sentinel proof preimage must include {snippet}")
 
