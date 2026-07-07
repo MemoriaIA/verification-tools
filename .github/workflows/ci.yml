@@ -72,27 +72,91 @@ jobs:
           VT_G19_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           VT_G19_PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
           VT_G19_CHECKOUT_SHA: ${{ github.sha }}
+          VT_G19_EXPECTED_WORKSPACE_HELPER_SHA: "e105de0bca00c509bfff6923515cccb9ab416013a20f17ff90a7159c52890a06"
         run: |
+          if [ -n "${GIT_DIR:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_DIR)"
+            exit 1
+          fi
+          if [ -n "${GIT_WORK_TREE:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_WORK_TREE)"
+            exit 1
+          fi
+          if [ -n "${GIT_EXEC_PATH:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_EXEC_PATH)"
+            exit 1
+          fi
+          if [ -n "${GIT_INDEX_FILE:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_INDEX_FILE)"
+            exit 1
+          fi
+          if [ -n "${GIT_OBJECT_DIRECTORY:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_OBJECT_DIRECTORY)"
+            exit 1
+          fi
+          if [ -n "${GIT_ALTERNATE_OBJECT_DIRECTORIES:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_ALTERNATE_OBJECT_DIRECTORIES)"
+            exit 1
+          fi
+          if [ -n "${GIT_CONFIG_GLOBAL:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_CONFIG_GLOBAL)"
+            exit 1
+          fi
+          if [ -n "${GIT_CONFIG_SYSTEM:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_CONFIG_SYSTEM)"
+            exit 1
+          fi
+          if [ -n "${GIT_CONFIG_NOSYSTEM:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_CONFIG_NOSYSTEM)"
+            exit 1
+          fi
+          git_config_env="$(env | sed -n 's/^\(GIT_CONFIG_[^=]*\)=.*/\1/p' | head -n 1)"
+          if [ -n "$git_config_env" ]; then
+            echo "G-19 FAIL: proof-critical git config environment variable is set ($git_config_env)"
+            exit 1
+          fi
+          if ! GIT_BIN="$(command -v git)"; then
+            echo "G-19 FAIL: git executable is unavailable"
+            exit 1
+          fi
+          if [ ! -x "$GIT_BIN" ]; then
+            echo "G-19 FAIL: git executable is unavailable"
+            exit 1
+          fi
+          GIT_BIN_DIR="$(cd "$(dirname "$GIT_BIN")" && pwd -P)"
+          GIT_BIN="$GIT_BIN_DIR/$(basename "$GIT_BIN")"
+          WORKSPACE_PHYSICAL="$(pwd -P)"
+          if [[ "$GIT_BIN" == "$WORKSPACE_PHYSICAL"/* || "$GIT_BIN" == /tmp/* || "$GIT_BIN" == /var/tmp/* || "$GIT_BIN" == /dev/shm/* || "$GIT_BIN" == */AppData/Local/Temp/* || "$GIT_BIN" == */Temp/* || "$GIT_BIN" == */_temp/* ]]; then
+            echo "G-19 FAIL: git executable resolves outside trusted system paths ($GIT_BIN)"
+            exit 1
+          fi
           ROOT_WORKSPACE="$PWD"
           MATERIALIZED_WORKTREE="$(mktemp -d)"
           cleanup_materialized_worktree() {
             cd "$ROOT_WORKSPACE"
-            git worktree remove --force "$MATERIALIZED_WORKTREE" >/dev/null 2>&1 || rm -rf "$MATERIALIZED_WORKTREE"
+            "$GIT_BIN" worktree remove --force "$MATERIALIZED_WORKTREE" >/dev/null 2>&1 || rm -rf "$MATERIALIZED_WORKTREE"
           }
           trap cleanup_materialized_worktree EXIT
-          git config core.autocrlf false
-          git worktree add --detach "$MATERIALIZED_WORKTREE" "$VT_G19_CHECKOUT_SHA"
+          "$GIT_BIN" config core.autocrlf false
+          "$GIT_BIN" worktree add --detach "$MATERIALIZED_WORKTREE" "$VT_G19_CHECKOUT_SHA"
           cd "$MATERIALIZED_WORKTREE"
-          git config core.autocrlf false
-          git reset --hard "$VT_G19_CHECKOUT_SHA"
-          source tests/lib/verify-tracked-workspace.sh
+          "$GIT_BIN" config core.autocrlf false
+          "$GIT_BIN" reset --hard "$VT_G19_CHECKOUT_SHA"
+          VERIFIED_WORKSPACE_HELPER="$MATERIALIZED_WORKTREE/.verified-workspace-helper"
+          "$GIT_BIN" cat-file blob "$VT_G19_CHECKOUT_SHA:tests/lib/verify-tracked-workspace.sh" > "$VERIFIED_WORKSPACE_HELPER"
+          WORKSPACE_HELPER_SHA="$(sha256sum "$VERIFIED_WORKSPACE_HELPER" | awk '{print $1}')"
+          if [ "$WORKSPACE_HELPER_SHA" != "$VT_G19_EXPECTED_WORKSPACE_HELPER_SHA" ]; then
+            echo "G-19 FAIL: verified workspace helper hash mismatch ($WORKSPACE_HELPER_SHA)"
+            exit 1
+          fi
+          source "$VERIFIED_WORKSPACE_HELPER"
           verify_tracked_workspace_file .github/workflows/ci.yml
           verify_tracked_workspace_file tests/lib/verify-tracked-workspace.sh
           verify_tracked_workspace_file tests/run-gates.sh
           verify_tracked_workspace_file tests/g19-v2-structural-check.sh
           verify_tracked_workspace_file memoriaia/verify/verify-hashchain.py
           verify_tracked_workspace_file verify/verify-hashchain.sh
-          git ls-files 'tests/fixtures/g19-v2/*.yml' | while IFS= read -r fixture; do
+          "$GIT_BIN" ls-files 'tests/fixtures/g19-v2/*.yml' | while IFS= read -r fixture; do
             verify_tracked_workspace_file "$fixture"
           done
           bash tests/run-gates.sh
@@ -100,16 +164,72 @@ jobs:
       - name: G-19 CI anti-theater (run-gates execution proof required)
         if: always()
         env:
-          VT_G19_EXPECTED_RUN_GATES_SHA: "0c3198c8eeaa6c294f0f4297ca353e2c4b38ad9d541b340fb8134278ea412e41"
-          VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA: "4a863d7bf214e87a2def62e014ff9894cd4e65e826f0fd30f87edaf50c849489"
+          VT_G19_EXPECTED_RUN_GATES_SHA: "c051591e9ddb0f39755669a8fcf0cfb274677b148d21f970db75eb6f294b95ee"
+          VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA: "974776bc43525ca66ebc4ccbc81e3bfc525dbdac771f922d67ffac9186f6a7ff"
           VT_G19_EXPECTED_WORKSPACE_HELPER_SHA: "e105de0bca00c509bfff6923515cccb9ab416013a20f17ff90a7159c52890a06"
           VT_G19_EXPECTED_VERIFY_PY_SHA: "abedd126eac0227dddad9267d8863d1b3b4921ef0bdc69301f59b9c9d708683b"
           VT_G19_EXPECTED_VERIFY_SH_SHA: "65694b5e0abe95f3322c45ab7c69b597d83121ec14001bdbba8e6e83f2224192"
-          VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA: "94c7a55ffcdd4b86cabf1b3fcd6ebb57d8250caadebe707f36b62d1dc6288483"
+          VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA: "6d570540f0abca4371324ee90121bc0c57e8ac82cb4527045f11f0d617b06d17"
           VT_G19_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           VT_G19_PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
           VT_G19_CHECKOUT_SHA: ${{ github.sha }}
         run: |
+          if [ -n "${GIT_DIR:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_DIR)"
+            exit 1
+          fi
+          if [ -n "${GIT_WORK_TREE:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_WORK_TREE)"
+            exit 1
+          fi
+          if [ -n "${GIT_EXEC_PATH:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_EXEC_PATH)"
+            exit 1
+          fi
+          if [ -n "${GIT_INDEX_FILE:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_INDEX_FILE)"
+            exit 1
+          fi
+          if [ -n "${GIT_OBJECT_DIRECTORY:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_OBJECT_DIRECTORY)"
+            exit 1
+          fi
+          if [ -n "${GIT_ALTERNATE_OBJECT_DIRECTORIES:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_ALTERNATE_OBJECT_DIRECTORIES)"
+            exit 1
+          fi
+          if [ -n "${GIT_CONFIG_GLOBAL:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_CONFIG_GLOBAL)"
+            exit 1
+          fi
+          if [ -n "${GIT_CONFIG_SYSTEM:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_CONFIG_SYSTEM)"
+            exit 1
+          fi
+          if [ -n "${GIT_CONFIG_NOSYSTEM:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_CONFIG_NOSYSTEM)"
+            exit 1
+          fi
+          git_config_env="$(env | sed -n 's/^\(GIT_CONFIG_[^=]*\)=.*/\1/p' | head -n 1)"
+          if [ -n "$git_config_env" ]; then
+            echo "G-19 FAIL: proof-critical git config environment variable is set ($git_config_env)"
+            exit 1
+          fi
+          if ! GIT_BIN="$(command -v git)"; then
+            echo "G-19 FAIL: git executable is unavailable"
+            exit 1
+          fi
+          if [ ! -x "$GIT_BIN" ]; then
+            echo "G-19 FAIL: git executable is unavailable"
+            exit 1
+          fi
+          GIT_BIN_DIR="$(cd "$(dirname "$GIT_BIN")" && pwd -P)"
+          GIT_BIN="$GIT_BIN_DIR/$(basename "$GIT_BIN")"
+          WORKSPACE_PHYSICAL="$(pwd -P)"
+          if [[ "$GIT_BIN" == "$WORKSPACE_PHYSICAL"/* || "$GIT_BIN" == /tmp/* || "$GIT_BIN" == /var/tmp/* || "$GIT_BIN" == /dev/shm/* || "$GIT_BIN" == */AppData/Local/Temp/* || "$GIT_BIN" == */Temp/* || "$GIT_BIN" == */_temp/* ]]; then
+            echo "G-19 FAIL: git executable resolves outside trusted system paths ($GIT_BIN)"
+            exit 1
+          fi
           if [ "${{ steps.run_gates.outcome }}" != "success" ]; then
             echo "G-19 FAIL: tests/run-gates.sh did not complete successfully (outcome: ${{ steps.run_gates.outcome }})"
             exit 1
@@ -126,38 +246,38 @@ jobs:
             echo "G-19 FAIL: checkout SHA is invalid ($VT_G19_CHECKOUT_SHA)"
             exit 1
           fi
-          CHECKOUT_SHA="$(git rev-parse HEAD)"
+          CHECKOUT_SHA="$("$GIT_BIN" rev-parse HEAD)"
           if [ "$CHECKOUT_SHA" != "$VT_G19_CHECKOUT_SHA" ]; then
             echo "G-19 FAIL: checkout SHA mismatch (expected $VT_G19_CHECKOUT_SHA, got $CHECKOUT_SHA)"
             exit 1
           fi
-          RUN_GATES_SHA="$(git cat-file blob "$CHECKOUT_SHA:tests/run-gates.sh" | sha256sum | awk '{print $1}')"
+          RUN_GATES_SHA="$("$GIT_BIN" cat-file blob "$CHECKOUT_SHA:tests/run-gates.sh" | sha256sum | awk '{print $1}')"
           if [ "$RUN_GATES_SHA" != "$VT_G19_EXPECTED_RUN_GATES_SHA" ]; then
             echo "G-19 FAIL: tests/run-gates.sh hash mismatch ($RUN_GATES_SHA)"
             exit 1
           fi
-          STRUCTURAL_CHECK_SHA="$(git cat-file blob "$CHECKOUT_SHA:tests/g19-v2-structural-check.sh" | sha256sum | awk '{print $1}')"
+          STRUCTURAL_CHECK_SHA="$("$GIT_BIN" cat-file blob "$CHECKOUT_SHA:tests/g19-v2-structural-check.sh" | sha256sum | awk '{print $1}')"
           if [ "$STRUCTURAL_CHECK_SHA" != "$VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA" ]; then
             echo "G-19 FAIL: tests/g19-v2-structural-check.sh hash mismatch ($STRUCTURAL_CHECK_SHA)"
             exit 1
           fi
-          WORKSPACE_HELPER_SHA="$(git cat-file blob "$CHECKOUT_SHA:tests/lib/verify-tracked-workspace.sh" | sha256sum | awk '{print $1}')"
+          WORKSPACE_HELPER_SHA="$("$GIT_BIN" cat-file blob "$CHECKOUT_SHA:tests/lib/verify-tracked-workspace.sh" | sha256sum | awk '{print $1}')"
           if [ "$WORKSPACE_HELPER_SHA" != "$VT_G19_EXPECTED_WORKSPACE_HELPER_SHA" ]; then
             echo "G-19 FAIL: tests/lib/verify-tracked-workspace.sh hash mismatch ($WORKSPACE_HELPER_SHA)"
             exit 1
           fi
-          CI_YML_SHA="$(git cat-file blob "$CHECKOUT_SHA:.github/workflows/ci.yml" | sha256sum | awk '{print $1}')"
-          VERIFY_PY_SHA="$(git cat-file blob "$CHECKOUT_SHA:memoriaia/verify/verify-hashchain.py" | sha256sum | awk '{print $1}')"
+          CI_YML_SHA="$("$GIT_BIN" cat-file blob "$CHECKOUT_SHA:.github/workflows/ci.yml" | sha256sum | awk '{print $1}')"
+          VERIFY_PY_SHA="$("$GIT_BIN" cat-file blob "$CHECKOUT_SHA:memoriaia/verify/verify-hashchain.py" | sha256sum | awk '{print $1}')"
           if [ "$VERIFY_PY_SHA" != "$VT_G19_EXPECTED_VERIFY_PY_SHA" ]; then
             echo "G-19 FAIL: memoriaia/verify/verify-hashchain.py hash mismatch ($VERIFY_PY_SHA)"
             exit 1
           fi
-          VERIFY_SH_SHA="$(git cat-file blob "$CHECKOUT_SHA:verify/verify-hashchain.sh" | sha256sum | awk '{print $1}')"
+          VERIFY_SH_SHA="$("$GIT_BIN" cat-file blob "$CHECKOUT_SHA:verify/verify-hashchain.sh" | sha256sum | awk '{print $1}')"
           if [ "$VERIFY_SH_SHA" != "$VT_G19_EXPECTED_VERIFY_SH_SHA" ]; then
             echo "G-19 FAIL: verify/verify-hashchain.sh hash mismatch ($VERIFY_SH_SHA)"
             exit 1
           fi
-          FIXTURE_MANIFEST_SHA="$(git ls-files 'tests/fixtures/g19-v2/*.yml' | while IFS= read -r fixture; do fixture_sha="$(git cat-file blob "$CHECKOUT_SHA:$fixture" | sha256sum | awk '{print $1}')"; printf '%s  %s\n' "$fixture_sha" "$fixture"; done | sha256sum | awk '{print $1}')"
+          FIXTURE_MANIFEST_SHA="$("$GIT_BIN" ls-files 'tests/fixtures/g19-v2/*.yml' | while IFS= read -r fixture; do fixture_sha="$("$GIT_BIN" cat-file blob "$CHECKOUT_SHA:$fixture" | sha256sum | awk '{print $1}')"; printf '%s  %s\n' "$fixture_sha" "$fixture"; done | sha256sum | awk '{print $1}')"
           if [ "$FIXTURE_MANIFEST_SHA" != "$VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA" ]; then
             echo "G-19 FAIL: G-19 fixture manifest hash mismatch ($FIXTURE_MANIFEST_SHA)"
             exit 1

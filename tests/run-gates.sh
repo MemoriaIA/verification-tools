@@ -782,10 +782,13 @@ mutant-inline-anonymous-run-github-env-bashenv.yml
 mutant-inline-anonymous-run-github-output-proof.yml
 mutant-step-merge-key-continue-on-error.yml
 mutant-step-env-path-poison.yml
+mutant-step-env-git-object-directory.yml
 mutant-step-quoted-continue-on-error.yml
 mutant-step-quoted-if-run.yml
 mutant-step-uses-upload-artifact.yml
 mutant-workflow-env-path-poison.yml
+mutant-workflow-env-git-dir.yml
+mutant-job-env-git-work-tree.yml
 mutant-workflow-default-shell-alias-or-true.yml
 mutant-workflow-default-shell-flow-map-or-true.yml
 mutant-workflow-default-shell-merge-key-or-true.yml
@@ -844,7 +847,6 @@ fi
 
 echo
 if [ "$FAILED" -eq 0 ]; then
-  echo "ALL GATES PASS"
   HEAD_SHA="$("$GIT_BIN" rev-parse HEAD 2>/dev/null || printf 'unknown')"
   PROOF_PR_HEAD_SHA="${VT_G19_PR_HEAD_SHA:-$HEAD_SHA}"
   PROOF_PR_BASE_SHA="${VT_G19_PR_BASE_SHA:-$HEAD_SHA}"
@@ -909,6 +911,7 @@ if [ "$FAILED" -eq 0 ]; then
       sha256sum |
       awk '{print $1}'
   )"
+  echo "ALL GATES PASS"
   echo "VT_G19_EXEC_PROOF=$VT_G19_EXEC_PROOF"
   [ -n "${GITHUB_OUTPUT:-}" ] && echo "vt_g19_exec_proof=$VT_G19_EXEC_PROOF" >> "$GITHUB_OUTPUT"
   exit 0
