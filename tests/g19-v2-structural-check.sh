@@ -1053,6 +1053,7 @@ if top_jobs_index is not None:
                 allowed_gate_digests = {
                     "1a047f357bfa20490e35bf61f4d32c271b286cd40b3430acc20ebb17222e631f",
                     "8c7e04e0a7acfc3877047e5e4154c3ceda231891e59c484b778051d961f77ff9",
+                    "f7f87489b2d30cd8c0f90312f26c949a1cbe25de94a1a2fd4562d1b7d68fcef1",
                 }
                 if gate_exec != expected_gate_exec and exec_digest(gate_exec) not in allowed_gate_digests:
                     fail("gate execution step must match the exact strict proof command sequence")
@@ -1237,6 +1238,7 @@ if top_jobs_index is not None:
                 allowed_sentinel_digests = {
                     "e31864ca935eb2778bcae7f07bfd049524b280a7f6b29a30bf148ba5b94961da",
                     "d511d151880b1e4cb9a7b8cd62c760a2cbc21528855fe28c151c217755aa2c3c",
+                    "93fab5f540b984ae08bc56862bca67e8256bf8fd660549d19dc6c49ffff741f9",
                 }
                 if sentinel_exec != expected_sentinel_exec and exec_digest(sentinel_exec) not in allowed_sentinel_digests:
                     fail("sentinel step must match the exact strict proof command sequence")

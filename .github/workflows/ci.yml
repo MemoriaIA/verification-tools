@@ -122,6 +122,10 @@ jobs:
             echo "G-19 FAIL: proof-critical git environment variable is set (GIT_CEILING_DIRECTORIES)"
             exit 1
           fi
+          if [ -n "${GIT_PAGER:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_PAGER)"
+            exit 1
+          fi
           git_config_env="$(env | sed -n 's/^\(GIT_CONFIG_[^=]*\)=.*/\1/p' | head -n 1)"
           if [ -n "$git_config_env" ]; then
             echo "G-19 FAIL: proof-critical git config environment variable is set ($git_config_env)"
@@ -176,12 +180,12 @@ jobs:
       - name: G-19 CI anti-theater (run-gates execution proof required)
         if: always()
         env:
-          VT_G19_EXPECTED_RUN_GATES_SHA: "af56651d70f46dfcf124bed4e41632565be87eacbd123ba13a7348ad99d15283"
-          VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA: "db8e425f0f23914c37bcfb4f99a05eaf7c1e5ff75ff78dd0e9eeb8c651258232"
+          VT_G19_EXPECTED_RUN_GATES_SHA: "d1ec3239d04d0cd3e716a2a6054befb76723146396f2de25550b194c36ff234b"
+          VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA: "4863e581cfa202621ca8a1529c0fca44faa348b4df30e1eb31e84addc1432716"
           VT_G19_EXPECTED_WORKSPACE_HELPER_SHA: "e105de0bca00c509bfff6923515cccb9ab416013a20f17ff90a7159c52890a06"
           VT_G19_EXPECTED_VERIFY_PY_SHA: "abedd126eac0227dddad9267d8863d1b3b4921ef0bdc69301f59b9c9d708683b"
           VT_G19_EXPECTED_VERIFY_SH_SHA: "65694b5e0abe95f3322c45ab7c69b597d83121ec14001bdbba8e6e83f2224192"
-          VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA: "ba4df165f7fa9a5738f5e9d128e6dd935e1ea2ea2a9f5cb6d3b0872faf5f3c3e"
+          VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA: "ed002608e565b853c03f868097e684361e43b49db6ae75f3567b8ef75dfea8ed"
           VT_G19_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           VT_G19_PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
           VT_G19_CHECKOUT_SHA: ${{ github.sha }}
@@ -232,6 +236,10 @@ jobs:
           fi
           if [ -n "${GIT_CEILING_DIRECTORIES:-}" ]; then
             echo "G-19 FAIL: proof-critical git environment variable is set (GIT_CEILING_DIRECTORIES)"
+            exit 1
+          fi
+          if [ -n "${GIT_PAGER:-}" ]; then
+            echo "G-19 FAIL: proof-critical git environment variable is set (GIT_PAGER)"
             exit 1
           fi
           git_config_env="$(env | sed -n 's/^\(GIT_CONFIG_[^=]*\)=.*/\1/p' | head -n 1)"

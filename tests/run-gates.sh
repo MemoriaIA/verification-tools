@@ -40,7 +40,8 @@ reject_git_environment_poisoning() {
     GIT_SSH \
     GIT_SSH_COMMAND \
     GIT_NAMESPACE \
-    GIT_CEILING_DIRECTORIES
+    GIT_CEILING_DIRECTORIES \
+    GIT_PAGER
   do
     if printenv "$name" >/dev/null 2>&1; then
       echo "SETUP FAIL: proof-critical git environment variable is set ($name)" >&2
@@ -441,7 +442,7 @@ ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|mutant-pres
 ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|mutant-inline-anonymous-run-pipe2-chomp-github-env|mutant-inline-run-plain-continuation-github-env-bashenv|mutant-inline-run-plain-continuation-github-output-proof|mutant-inline-run-single-quoted-continuation-github-env-bashenv|mutant-inline-run-single-quoted-continuation-github-output-proof}"
 ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|baseline-no-working-directory-safe|mutant-prestep-shadow-run-gates-stub|mutant-prestep-shadow-structural-checker-stub|mutant-prestep-shadow-verifier-stub|mutant-step-working-directory-shadow-tree|mutant-job-working-directory-shadow-tree|mutant-prestep-block-ansi-octal-137-env|mutant-prestep-block-ansi-octal-137-output-proof|mutant-prestep-block-ansi-octal-137-path|mutant-prestep-block-ansi-octal-bashenv|mutant-prestep-source-github-env|mutant-prestep-dot-github-env|mutant-inline-run-single-quoted-doubled-quote-github-env|mutant-sentinel-proof-variable-option-plain-nameref-overwrite|mutant-prestep-command-substitution-bash-c-github-env|mutant-prestep-bash-ec-github-env|mutant-prestep-process-substitution-bash-github-env|mutant-prestep-git-checkout-head-drift|mutant-gate-post-verify-run-gates-rewrite|mutant-gate-missing-ci-yml-verify|mutant-gate-missing-helper-source|mutant-sentinel-extra-command|mutant-sentinel-v3-proof-preimage|mutant-workflow-dispatch-enabled|mutant-workflow-dispatch-flow-sequence|mutant-prestep-command-git-checkout-head-drift|mutant-sentinel-printf-redirect-side-effect|mutant-prestep-truncate-run-gates|mutant-gate-inline-git-checkout-before-run|mutant-prestep-env-git-checkout-head-drift|mutant-prestep-usrbin-git-checkout-head-drift|mutant-prestep-git-C-checkout-head-drift|mutant-prestep-tee-run-gates|mutant-prestep-colon-redir-run-gates|mutant-sentinel-exec-printf-side-effect|mutant-sentinel-builtin-printf-side-effect|mutant-sentinel-expected-proof-overwrite}"
 ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|mutant-workflow-env-git-dir|mutant-job-env-git-work-tree|mutant-step-env-git-object-directory}"
-ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|mutant-workflow-dispatch-block-sequence|mutant-prestep-var-run-gates-writer|mutant-prestep-write-trusted-git|mutant-workflow-env-git-namespace|mutant-job-env-git-ceiling-directories}"
+ALLOWED="${ALLOWED/skipped-run_gates-mutant/skipped-run_gates-mutant|mutant-workflow-dispatch-block-sequence|mutant-prestep-var-run-gates-writer|mutant-prestep-write-trusted-git|mutant-workflow-env-git-namespace|mutant-job-env-git-ceiling-directories|mutant-job-env-git-pager}"
 TRACKED_FILES="$WORK/tracked-files.txt"
 if ! "$GIT_BIN" ls-files >"$TRACKED_FILES"; then
   fail "G-18 tracked file scan completed" "git ls-files failed"
@@ -522,7 +523,8 @@ for poison_name in \
   GIT_SSH \
   GIT_SSH_COMMAND \
   GIT_NAMESPACE \
-  GIT_CEILING_DIRECTORIES
+  GIT_CEILING_DIRECTORIES \
+  GIT_PAGER
 do
   if (
     export "$poison_name=$WORK/poison"
@@ -799,6 +801,7 @@ mutant-workflow-env-git-dir.yml
 mutant-workflow-env-git-namespace.yml
 mutant-job-env-git-work-tree.yml
 mutant-job-env-git-ceiling-directories.yml
+mutant-job-env-git-pager.yml
 mutant-workflow-default-shell-alias-or-true.yml
 mutant-workflow-default-shell-flow-map-or-true.yml
 mutant-workflow-default-shell-merge-key-or-true.yml
