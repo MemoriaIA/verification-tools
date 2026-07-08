@@ -984,6 +984,121 @@ else
   fail "G-26 whitespace guard rejects checked-range .gitattributes changes" ".gitattributes change was not detected in the checked range"
 fi
 
+WHITESPACE_PIPEFAIL_REPO="$WORK/whitespace-attributes-pipefail-repo"
+mkdir -p "$WHITESPACE_PIPEFAIL_REPO"
+if (
+  cd "$WHITESPACE_PIPEFAIL_REPO" &&
+  git init -q &&
+  git config user.name "verification-tools-gates" &&
+  git config user.email "verification-tools@example.invalid" &&
+  git config core.autocrlf false &&
+  printf 'clean\n' > tracked.txt &&
+  git add tracked.txt &&
+  git commit -q -m "base-clean" &&
+  WS_BASE_SHA="$(git rev-parse HEAD)" &&
+  printf '* -whitespace\n' > .gitattributes &&
+  i=0 &&
+  while [ "$i" -lt 512 ]; do
+    printf 'filler %s\n' "$i" > "$(printf 'z%03d.txt' "$i")" &&
+    i=$((i + 1))
+  done &&
+  git add .gitattributes z*.txt &&
+  git commit -q -m "head-many-files-with-attributes" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  set -o pipefail &&
+  WHITESPACE_CHANGED_PATHS="$(git diff --name-status --no-renames "$WS_BASE_SHA..$WS_HEAD_SHA")" &&
+  WS_ATTR_CHANGED=0 &&
+  while IFS= read -r ws_line; do
+    [ -z "$ws_line" ] && continue
+    ws_path="${ws_line##*	}"
+    case "$ws_path" in
+      .gitattributes|*/.gitattributes)
+        WS_ATTR_CHANGED=1
+        ;;
+    esac
+  done <<EOF
+$WHITESPACE_CHANGED_PATHS
+EOF
+  [ "$WS_ATTR_CHANGED" -eq 1 ]
+); then
+  pass "G-27 pipefail-safe .gitattributes detection remains stable on large diffs"
+else
+  fail "G-27 pipefail-safe .gitattributes detection remains stable on large diffs" "status-based detection missed .gitattributes with pipefail enabled"
+fi
+
+if (
+  cd "$WHITESPACE_PIPEFAIL_REPO" &&
+  WS_BASE_SHA="$(git rev-parse HEAD~1)" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  WHITESPACE_CHANGED_PATHS="$(git diff --name-status --no-renames "$WS_BASE_SHA..$WS_HEAD_SHA")" &&
+  WS_ATTR_CHANGED=0 &&
+  while IFS= read -r ws_line; do
+    [ -z "$ws_line" ] && continue
+    ws_path="${ws_line##*	}"
+    case "$ws_path" in
+      .gitattributes|*/.gitattributes)
+        WS_ATTR_CHANGED=1
+        ;;
+    esac
+  done <<EOF
+$WHITESPACE_CHANGED_PATHS
+EOF
+  [ "$WS_ATTR_CHANGED" -eq 1 ]
+); then
+  pass "G-28 status-based .gitattributes detection survives pipefail scenarios"
+else
+  fail "G-28 status-based .gitattributes detection survives pipefail scenarios" "status-based detection did not mark .gitattributes as changed"
+fi
+
+WHITESPACE_RENAME_REPO="$WORK/whitespace-attributes-rename-repo"
+mkdir -p "$WHITESPACE_RENAME_REPO"
+if (
+  cd "$WHITESPACE_RENAME_REPO" &&
+  git init -q &&
+  git config user.name "verification-tools-gates" &&
+  git config user.email "verification-tools@example.invalid" &&
+  git config core.autocrlf false &&
+  printf '*.txt whitespace=tab-in-indent\n' > .gitattributes &&
+  printf 'clean\n' > tracked.txt &&
+  git add .gitattributes tracked.txt &&
+  git commit -q -m "base-with-gitattributes" &&
+  WS_BASE_SHA="$(git rev-parse HEAD)" &&
+  git mv .gitattributes attrs &&
+  printf '\tindented\n' > tracked.txt &&
+  git add attrs tracked.txt &&
+  git commit -q -m "rename-away-gitattributes" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  ! git diff --name-only "$WS_BASE_SHA..$WS_HEAD_SHA" | grep -qE '(^|/)\.gitattributes$'
+); then
+  pass "G-29 name-only .gitattributes detection misses rename-away sources"
+else
+  fail "G-29 name-only .gitattributes detection misses rename-away sources" "name-only unexpectedly detected renamed-away .gitattributes"
+fi
+
+if (
+  cd "$WHITESPACE_RENAME_REPO" &&
+  WS_BASE_SHA="$(git rev-parse HEAD~1)" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  WHITESPACE_CHANGED_PATHS="$(git diff --name-status --no-renames "$WS_BASE_SHA..$WS_HEAD_SHA")" &&
+  WS_ATTR_CHANGED=0 &&
+  while IFS= read -r ws_line; do
+    [ -z "$ws_line" ] && continue
+    ws_path="${ws_line##*	}"
+    case "$ws_path" in
+      .gitattributes|*/.gitattributes)
+        WS_ATTR_CHANGED=1
+        ;;
+    esac
+  done <<EOF
+$WHITESPACE_CHANGED_PATHS
+EOF
+  [ "$WS_ATTR_CHANGED" -eq 1 ]
+); then
+  pass "G-30 status-based .gitattributes detection catches rename-away sources"
+else
+  fail "G-30 status-based .gitattributes detection catches rename-away sources" "status-based detection missed renamed-away .gitattributes"
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then
   HEAD_SHA="$("$GIT_BIN" rev-parse HEAD 2>/dev/null || printf 'unknown')"
