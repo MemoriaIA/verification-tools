@@ -27,7 +27,10 @@ These tools allow any third party to verify the internal hash-chain consistency 
 
 The same boundary applies to a sufficiently privileged actor who can rewrite the snapshot and recompute the affected hashes. A vault whose newest entries were removed, or whose history was rewritten and rehashed into a new self-consistent chain, will verify as `VALID` with exit code `0`. What *is* detected: non-recomputed edits, broken `prev_hash` links, sequence gaps, partial rewrites, malformed stored hashes, and other inconsistencies inside the exact file being verified.
 
-**Future architecture (not implemented).** A later version may bind the chain to an externally anchored head commitment. This is documented as planned direction only. No such anchor is implemented in these tools today, and the claims in this repository must be read accordingly.
+**Campaign status (under CEO_GO_VTOOLS_RELEASE_READINESS_FULL_CAMPAIGN_NO_RELEASE_01):**  
+Work is underway to implement signed manifest binding and external anchor models. See `RELEASE-READINESS-DESIGN.md` in this repo for the authoritative design.
+
+The verifier now supports `--manifest` (bounded, demo signature only — test keys, fail-closed). Production signing and anchor publication are out of scope for this campaign. All claims remain strictly bounded per the design and the CEO token.
 
 ---
 
