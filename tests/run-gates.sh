@@ -1099,6 +1099,44 @@ else
   fail "G-30 status-based .gitattributes detection catches rename-away sources" "status-based detection missed renamed-away .gitattributes"
 fi
 
+WHITESPACE_SUFFIX_REPO="$WORK/whitespace-suffix-path-repo"
+mkdir -p "$WHITESPACE_SUFFIX_REPO"
+if (
+  cd "$WHITESPACE_SUFFIX_REPO" &&
+  git init -q &&
+  git config user.name "verification-tools-gates" &&
+  git config user.email "verification-tools@example.invalid" &&
+  git config core.autocrlf false &&
+  mkdir -p docs &&
+  printf 'clean\n' > tracked.txt &&
+  git add tracked.txt &&
+  git commit -q -m "base-clean" &&
+  WS_BASE_SHA="$(git rev-parse HEAD)" &&
+  printf 'fixture only\n' > docs/foo.gitattributes &&
+  git add docs/foo.gitattributes &&
+  git commit -q -m "head-adds-suffix-only-file" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  WHITESPACE_CHANGED_PATHS="$(git diff --name-status --no-renames "$WS_BASE_SHA..$WS_HEAD_SHA")" &&
+  WS_ATTR_CHANGED=0 &&
+  while IFS= read -r ws_line; do
+    [ -z "$ws_line" ] && continue
+    ws_path="${ws_line##*	}"
+    case "$ws_path" in
+      .gitattributes|*/.gitattributes)
+        WS_ATTR_CHANGED=1
+        ;;
+    esac
+  done <<EOF
+$WHITESPACE_CHANGED_PATHS
+EOF
+  [ "$WS_ATTR_CHANGED" -eq 0 ] &&
+  printf '%s\n' "$WHITESPACE_CHANGED_PATHS" | grep -qE '\.gitattributes$'
+); then
+  pass "G-31 status-based .gitattributes detection ignores suffix-only regular files"
+else
+  fail "G-31 status-based .gitattributes detection ignores suffix-only regular files" "suffix-only regular file still triggered .gitattributes guard"
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then
   HEAD_SHA="$("$GIT_BIN" rev-parse HEAD 2>/dev/null || printf 'unknown')"
