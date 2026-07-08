@@ -403,4 +403,3 @@ jobs:
           fi
           echo "G-19 PASS: PR head $VT_G19_PR_HEAD_SHA; base $VT_G19_PR_BASE_SHA; checkout $CHECKOUT_SHA"
           echo "G-19 PASS: Execution proved ($PROOF)"
-
