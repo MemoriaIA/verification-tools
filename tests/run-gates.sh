@@ -1286,6 +1286,7 @@ if [ "$FAILED" -eq 0 ]; then
       memoriaia/verify/verify-release-manifest.py \
       verify/verify-release-manifest.sh \
       release/README.md \
+      release/BOOTSTRAP.md \
       release/fixtures/example-release-manifest.json \
       release/fixtures/example-release-manifest.sig \
       release/test-public-key.pub
@@ -1302,6 +1303,30 @@ if [ "$FAILED" -eq 0 ]; then
   VERIFY_PY_SHA="$(tracked_blob_sha256 "memoriaia/verify/verify-hashchain.py")" || exit 2
   VERIFY_SH_SHA="$(tracked_blob_sha256 "verify/verify-hashchain.sh")" || exit 2
   G19_FIXTURE_MANIFEST_SHA="$(fixture_manifest_sha256)" || exit 2
+
+  # === Release manifest verifier gates (PHASE 2/6 per CEO_GO_VTOOLS_RELEASE_READINESS_FULL_CAMPAIGN_NO_RELEASE_01) ===
+  # Gold standard: the new release surface must be exercised with positive and negative cases inside the gate suite.
+  echo "[release manifest gates]"
+  MANIFEST_CMD="bash verify/verify-release-manifest.sh --manifest release/fixtures/example-release-manifest.json --signature release/fixtures/example-release-manifest.sig --public-key release/test-public-key.pub"
+  if $MANIFEST_CMD >"$OUT" 2>&1; then
+    pass "M-1 manifest positive verification"
+  else
+    fail "M-1 manifest positive verification" "$(cat "$OUT")"
+  fi
+
+  # Negative: tampered snapshot hash must fail closed
+  cp release/fixtures/example-release-manifest.json "$WORK/tampered-manifest.json"
+  python - "$WORK/tampered-manifest.json" <<'PY'
+import json, sys
+m = json.load(open(sys.argv[1]))
+m["snapshot"]["sha256"] = "0" * 64
+json.dump(m, open(sys.argv[1], "w"))
+PY
+  if bash verify/verify-release-manifest.sh --manifest "$WORK/tampered-manifest.json" --signature release/fixtures/example-release-manifest.sig --public-key release/test-public-key.pub >"$OUT" 2>&1; then
+    fail "M-2 manifest negative (tampered snapshot) must fail" "unexpected pass"
+  else
+    pass "M-2 manifest negative (tampered snapshot) correctly failed"
+  fi
   RELEASE_MATERIAL_SHA="$(release_material_sha256)" || exit 2
   VT_G19_EXEC_PROOF="$(
     printf 'VT_G19_EXECUTED:v4\nPR_HEAD:%s\nPR_BASE:%s\nCHECKOUT:%s\nCI_YML:%s\nRUN_GATES:%s\nSTRUCTURAL:%s\nWORKSPACE_HELPER:%s\nVERIFY_PY:%s\nVERIFY_SH:%s\nFIXTURES:%s\nRELEASE_MATERIAL:%s\n' \
