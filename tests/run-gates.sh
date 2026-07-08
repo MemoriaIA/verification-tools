@@ -224,6 +224,7 @@ rm -rf "$WORK"
 mkdir "$WORK" || { echo "SETUP FAIL: could not create $WORK"; exit 2; }
 trap 'rm -rf "$WORK"' EXIT
 OUT="$WORK/out.txt"
+OUT_ABS="$ROOT_PHYSICAL/$OUT"
 FAILED=0
 
 echo "== verification-tools gate suite =="
@@ -745,7 +746,7 @@ if (
     --public-key "$BAD_RELEASE_PUB" \
     --expected-public-key-sha256 "$BAD_RELEASE_PUB_SHA" \
     --repo-root "$WORK" \
-    --release-mode >"$OUT" 2>&1
+    --release-mode >"$OUT_ABS" 2>&1
 ); then
   fail "G-18d3 release mode rejects symlink-parent snapshot escape" "symlink-parent snapshot path unexpectedly passed"
 else
