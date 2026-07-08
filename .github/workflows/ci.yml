@@ -217,7 +217,7 @@ jobs:
           VT_G19_EXPECTED_WORKSPACE_HELPER_SHA: "e105de0bca00c509bfff6923515cccb9ab416013a20f17ff90a7159c52890a06"
           VT_G19_EXPECTED_VERIFY_PY_SHA: "abedd126eac0227dddad9267d8863d1b3b4921ef0bdc69301f59b9c9d708683b"
           VT_G19_EXPECTED_VERIFY_SH_SHA: "65694b5e0abe95f3322c45ab7c69b597d83121ec14001bdbba8e6e83f2224192"
-          VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA: "0b279bc36a9faafe09ef9f2acd7856cd3a9dbc623aea9a2008749f31bec858e8"
+          VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA: "ed002608e565b853c03f868097e684361e43b49db6ae75f3567b8ef75dfea8ed"
           VT_G19_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           VT_G19_PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
           VT_G19_CHECKOUT_SHA: ${{ github.sha }}
