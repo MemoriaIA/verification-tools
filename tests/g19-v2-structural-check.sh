@@ -248,6 +248,7 @@ else:
 
 GATE_STEP_NAME = "Run verification gate suite"
 SENTINEL_STEP_NAME = "G-19 CI anti-theater (run-gates execution proof required)"
+WHITESPACE_STEP_NAME = "Whitespace guard"
 
 
 def find_direct_child(start, end, parent_indent, key_name):
@@ -726,6 +727,19 @@ def step_env_values(step):
     return values
 
 
+def step_with_values(step):
+    values = {}
+    for with_index in step["key_indexes"].get("with", []):
+        with_end = block_end(with_index, 8, SCALAR_LINES)
+        for index in range(with_index + 1, with_end):
+            if SCALAR_LINES[index]:
+                continue
+            parsed = parse_key(lines[index])
+            if parsed and parsed["indent"] == 10:
+                values[parsed["key"]] = strip_quotes(parsed["value"])
+    return values
+
+
 def writes_execution_proof_output(run_lines):
     code_lines = [normalize_shell_words(line.split("#", 1)[0]) for line in executable_lines(run_lines)]
     joined = "\n".join(code_lines)
@@ -999,10 +1013,95 @@ if top_jobs_index is not None:
 
         gate_steps = [step for step in steps if step["name"] == GATE_STEP_NAME]
         sentinel_steps = [step for step in steps if step["name"] == SENTINEL_STEP_NAME]
+        whitespace_steps = [step for step in steps if step["name"] == WHITESPACE_STEP_NAME]
         if len(gate_steps) != 1:
             fail(f"expected exactly one '{GATE_STEP_NAME}' step, found {len(gate_steps)}")
         if len(sentinel_steps) != 1:
             fail(f"expected exactly one '{SENTINEL_STEP_NAME}' step, found {len(sentinel_steps)}")
+        if strict_workflow_proof and len(whitespace_steps) != 1:
+            fail(f"expected exactly one '{WHITESPACE_STEP_NAME}' step, found {len(whitespace_steps)}")
+
+        if strict_workflow_proof:
+            checkout_steps = [step for step in steps if step["name"] == "Checkout"]
+            if len(checkout_steps) != 1:
+                fail(f"expected exactly one 'Checkout' step, found {len(checkout_steps)}")
+            else:
+                checkout = checkout_steps[0]
+                if strip_quotes(checkout["keys"].get("uses", "")) != "actions/checkout@v4":
+                    fail("Checkout step must use actions/checkout@v4")
+                checkout_with = step_with_values(checkout)
+                if checkout_with.get("fetch-depth") != "0":
+                    fail("Checkout step must set with.fetch-depth to 0 for range-aware whitespace verification")
+
+        if len(whitespace_steps) == 1:
+            whitespace = whitespace_steps[0]
+            whitespace_exec = executable_lines(whitespace["run_lines"])
+            whitespace_env = step_env_values(whitespace)
+            if "if" in whitespace["keys"]:
+                fail("whitespace guard must not define an if guard")
+            if "continue-on-error" in whitespace["keys"]:
+                fail("whitespace guard must not define continue-on-error")
+            if "shell" in whitespace["keys"] and strip_quotes(whitespace["keys"]["shell"]) != "bash":
+                fail("whitespace guard shell must be exactly bash when present")
+            if "working-directory" in whitespace["keys"]:
+                fail("whitespace guard must not define working-directory")
+            if whitespace["run_style"] == ">":
+                fail("folded scalar run: > found on whitespace guard")
+            if any(contains_neutralizer(line) for line in whitespace_exec):
+                fail("whitespace guard contains gate-neutralizing pattern(s)")
+            if len(whitespace_exec) == 1 and whitespace_exec[0] == "git diff --check":
+                fail("whitespace guard must not rely on bare git diff --check")
+            if strict_workflow_proof:
+                expected_whitespace_exec = [
+                    'if ! printf \'%s\\n\' "$VT_WS_BASE_SHA" | grep -qE \'^[0-9a-f]{40}$\'; then',
+                    'echo "WHITESPACE FAIL: base SHA is invalid ($VT_WS_BASE_SHA)"',
+                    "exit 1",
+                    "fi",
+                    'if ! printf \'%s\\n\' "$VT_WS_HEAD_SHA" | grep -qE \'^[0-9a-f]{40}$\'; then',
+                    'echo "WHITESPACE FAIL: head SHA is invalid ($VT_WS_HEAD_SHA)"',
+                    "exit 1",
+                    "fi",
+                    'if ! git cat-file -e "$VT_WS_BASE_SHA^{commit}" 2>/dev/null; then',
+                    'echo "WHITESPACE FAIL: base commit is unavailable ($VT_WS_BASE_SHA)"',
+                    "exit 1",
+                    "fi",
+                    'if ! git cat-file -e "$VT_WS_HEAD_SHA^{commit}" 2>/dev/null; then',
+                    'echo "WHITESPACE FAIL: head commit is unavailable ($VT_WS_HEAD_SHA)"',
+                    "exit 1",
+                    "fi",
+                    'if [ "$VT_WS_EVENT_NAME" = "pull_request" ] || [ "$VT_WS_EVENT_NAME" = "pull_request_target" ]; then',
+                    'WHITESPACE_RANGE="$VT_WS_BASE_SHA...$VT_WS_HEAD_SHA"',
+                    "else",
+                    'WHITESPACE_RANGE="$VT_WS_BASE_SHA..$VT_WS_HEAD_SHA"',
+                    "fi",
+                    'echo "WHITESPACE RANGE: $WHITESPACE_RANGE"',
+                    'WHITESPACE_CHANGED_FILE=.vt-whitespace-changed-paths.txt',
+                    'git diff --name-status --no-renames "$WHITESPACE_RANGE" > "$WHITESPACE_CHANGED_FILE"',
+                    'WS_ATTR_CHANGED=0',
+                    'while IFS= read -r ws_line; do',
+                    '[ -z "$ws_line" ] && continue',
+                    "ws_path=\"${ws_line#*$'\\t'}\"",
+                    'case "$ws_path" in',
+                    '.gitattributes|*/.gitattributes)',
+                    'WS_ATTR_CHANGED=1',
+                    ';;',
+                    'esac',
+                    'done < "$WHITESPACE_CHANGED_FILE"',
+                    'if [ "$WS_ATTR_CHANGED" -eq 1 ]; then',
+                    'echo "WHITESPACE FAIL: .gitattributes changed in checked range ($WHITESPACE_RANGE)"',
+                    "exit 1",
+                    "fi",
+                    'rm -f "$WHITESPACE_CHANGED_FILE"',
+                    'git -c core.attributesFile=/dev/null diff --check "$WHITESPACE_RANGE"',
+                ]
+                if whitespace_exec != expected_whitespace_exec:
+                    fail("whitespace guard must match the exact range-aware command sequence")
+                if whitespace_env.get("VT_WS_BASE_SHA") != "${{ github.event.pull_request.base.sha || github.event.before || '' }}":
+                    fail("whitespace guard env must define VT_WS_BASE_SHA from GitHub event context")
+                if whitespace_env.get("VT_WS_HEAD_SHA") != "${{ github.event.pull_request.head.sha || github.sha }}":
+                    fail("whitespace guard env must define VT_WS_HEAD_SHA from GitHub event context")
+                if whitespace_env.get("VT_WS_EVENT_NAME") != "${{ github.event_name }}":
+                    fail("whitespace guard env must define VT_WS_EVENT_NAME from GitHub event context")
 
         if len(gate_steps) == 1:
             gate = gate_steps[0]

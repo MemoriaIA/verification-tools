@@ -858,6 +858,285 @@ if [ "$G19_FIXTURE_MISSING" -eq 0 ]; then
   done
 fi
 
+WHITESPACE_REPO="$WORK/whitespace-range-repo"
+mkdir -p "$WHITESPACE_REPO"
+WHITESPACE_OUT="$ROOT/$OUT"
+if (
+  cd "$WHITESPACE_REPO" &&
+  git init -q &&
+  git config user.name "verification-tools-gates" &&
+  git config user.email "verification-tools@example.invalid" &&
+  git config core.autocrlf false &&
+  printf 'alpha\n' > clean.txt &&
+  git add clean.txt &&
+  git commit -q -m "base" &&
+  WS_BASE_SHA="$(git rev-parse HEAD)" &&
+  printf 'alpha   \n' > clean.txt &&
+  git add clean.txt &&
+  git commit -q -m "head-with-whitespace" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  git diff --check >"$WHITESPACE_OUT" 2>&1
+); then
+  pass "G-20 bare git diff --check misses committed whitespace on clean worktree"
+else
+  fail "G-20 bare git diff --check misses committed whitespace on clean worktree" "$(tr '\n' ';' <"$WHITESPACE_OUT")"
+fi
+
+if (
+  cd "$WHITESPACE_REPO" &&
+  WS_BASE_SHA="$(git rev-parse HEAD~1)" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  git -c core.attributesFile=/dev/null diff --check "$WS_BASE_SHA..$WS_HEAD_SHA" >"$WHITESPACE_OUT" 2>&1
+); then
+  fail "G-21 range-aware whitespace guard rejects committed whitespace" "range-aware diff unexpectedly passed"
+else
+  pass "G-21 range-aware whitespace guard rejects committed whitespace"
+fi
+
+if (
+  cd "$WHITESPACE_REPO" &&
+  WS_BASE_SHA="0000000000000000000000000000000000000000" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  git cat-file -e "$WS_BASE_SHA^{commit}" 2>/dev/null &&
+  git diff --check "$WS_BASE_SHA..$WS_HEAD_SHA" >"$WHITESPACE_OUT" 2>&1
+); then
+  fail "G-22 whitespace guard rejects invalid base SHA" "invalid base SHA unexpectedly passed"
+else
+  pass "G-22 whitespace guard rejects invalid base SHA"
+fi
+
+if (
+  cd "$WHITESPACE_REPO" &&
+  git checkout -q HEAD~1 &&
+  WS_BASE_SHA="$(git rev-parse HEAD)" &&
+  printf 'beta\n' > clean.txt &&
+  git add clean.txt &&
+  git commit -q -m "head-clean" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  git -c core.attributesFile=/dev/null diff --check "$WS_BASE_SHA..$WS_HEAD_SHA" >"$WHITESPACE_OUT" 2>&1
+); then
+  pass "G-23 range-aware whitespace guard passes clean committed range"
+else
+  fail "G-23 range-aware whitespace guard passes clean committed range" "$(tr '\n' ';' <"$WHITESPACE_OUT")"
+fi
+
+WHITESPACE_PR_REPO="$WORK/whitespace-pr-merge-base-repo"
+mkdir -p "$WHITESPACE_PR_REPO"
+if (
+  cd "$WHITESPACE_PR_REPO" &&
+  git init -q &&
+  git config user.name "verification-tools-gates" &&
+  git config user.email "verification-tools@example.invalid" &&
+  git config core.autocrlf false &&
+  printf 'legacy   \n' > inherited.txt &&
+  git add inherited.txt &&
+  git commit -q -m "branch-point-with-legacy-whitespace" &&
+  git branch feature &&
+  printf 'legacy\n' > inherited.txt &&
+  git add inherited.txt &&
+  git commit -q -m "main-cleans-legacy-whitespace" &&
+  WS_BASE_SHA="$(git rev-parse HEAD)" &&
+  printf '%s' "$WS_BASE_SHA" > .ws-base-sha &&
+  git checkout -q feature &&
+  printf 'feature\n' > feature.txt &&
+  git add feature.txt &&
+  git commit -q -m "feature-does-not-touch-legacy-whitespace" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  git -c core.attributesFile=/dev/null diff --check "$WS_BASE_SHA..$WS_HEAD_SHA" >"$WHITESPACE_OUT" 2>&1
+); then
+  fail "G-24 two-dot whitespace diff false-positives after base cleanup" "two-dot diff unexpectedly passed"
+else
+  pass "G-24 two-dot whitespace diff false-positives after base cleanup"
+fi
+
+if (
+  cd "$WHITESPACE_PR_REPO" &&
+  WS_BASE_SHA="$(cat .ws-base-sha)" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  git -c core.attributesFile=/dev/null diff --check "$WS_BASE_SHA...$WS_HEAD_SHA" >"$WHITESPACE_OUT" 2>&1
+); then
+  pass "G-25 triple-dot whitespace diff uses merge base for pull requests"
+else
+  fail "G-25 triple-dot whitespace diff uses merge base for pull requests" "$(tr '\n' ';' <"$WHITESPACE_OUT")"
+fi
+
+WHITESPACE_ATTR_REPO="$WORK/whitespace-attributes-repo"
+mkdir -p "$WHITESPACE_ATTR_REPO"
+if (
+  cd "$WHITESPACE_ATTR_REPO" &&
+  git init -q &&
+  git config user.name "verification-tools-gates" &&
+  git config user.email "verification-tools@example.invalid" &&
+  git config core.autocrlf false &&
+  printf 'clean\n' > tracked.txt &&
+  git add tracked.txt &&
+  git commit -q -m "base-clean" &&
+  WS_BASE_SHA="$(git rev-parse HEAD)" &&
+  printf '* -whitespace\n' > .gitattributes &&
+  printf 'dirty   \n' > tracked.txt &&
+  git add .gitattributes tracked.txt &&
+  git commit -q -m "head-relaxes-whitespace-attributes" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  git diff --name-only "$WS_BASE_SHA..$WS_HEAD_SHA" | grep -qE '(^|/)\.gitattributes$'
+); then
+  pass "G-26 whitespace guard rejects checked-range .gitattributes changes"
+else
+  fail "G-26 whitespace guard rejects checked-range .gitattributes changes" ".gitattributes change was not detected in the checked range"
+fi
+
+WHITESPACE_PIPEFAIL_REPO="$WORK/whitespace-attributes-pipefail-repo"
+mkdir -p "$WHITESPACE_PIPEFAIL_REPO"
+if (
+  cd "$WHITESPACE_PIPEFAIL_REPO" &&
+  git init -q &&
+  git config user.name "verification-tools-gates" &&
+  git config user.email "verification-tools@example.invalid" &&
+  git config core.autocrlf false &&
+  printf 'clean\n' > tracked.txt &&
+  git add tracked.txt &&
+  git commit -q -m "base-clean" &&
+  WS_BASE_SHA="$(git rev-parse HEAD)" &&
+  printf '* -whitespace\n' > .gitattributes &&
+  i=0 &&
+  while [ "$i" -lt 512 ]; do
+    printf 'filler %s\n' "$i" > "$(printf 'z%03d.txt' "$i")" &&
+    i=$((i + 1))
+  done &&
+  git add .gitattributes z*.txt &&
+  git commit -q -m "head-many-files-with-attributes" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  set -o pipefail &&
+  WHITESPACE_CHANGED_PATHS="$(git diff --name-status --no-renames "$WS_BASE_SHA..$WS_HEAD_SHA")" &&
+  WS_ATTR_CHANGED=0 &&
+  while IFS= read -r ws_line; do
+    [ -z "$ws_line" ] && continue
+    ws_path="${ws_line##*	}"
+    case "$ws_path" in
+      .gitattributes|*/.gitattributes)
+        WS_ATTR_CHANGED=1
+        ;;
+    esac
+  done <<EOF
+$WHITESPACE_CHANGED_PATHS
+EOF
+  [ "$WS_ATTR_CHANGED" -eq 1 ]
+); then
+  pass "G-27 pipefail-safe .gitattributes detection remains stable on large diffs"
+else
+  fail "G-27 pipefail-safe .gitattributes detection remains stable on large diffs" "status-based detection missed .gitattributes with pipefail enabled"
+fi
+
+if (
+  cd "$WHITESPACE_PIPEFAIL_REPO" &&
+  WS_BASE_SHA="$(git rev-parse HEAD~1)" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  WHITESPACE_CHANGED_PATHS="$(git diff --name-status --no-renames "$WS_BASE_SHA..$WS_HEAD_SHA")" &&
+  WS_ATTR_CHANGED=0 &&
+  while IFS= read -r ws_line; do
+    [ -z "$ws_line" ] && continue
+    ws_path="${ws_line##*	}"
+    case "$ws_path" in
+      .gitattributes|*/.gitattributes)
+        WS_ATTR_CHANGED=1
+        ;;
+    esac
+  done <<EOF
+$WHITESPACE_CHANGED_PATHS
+EOF
+  [ "$WS_ATTR_CHANGED" -eq 1 ]
+); then
+  pass "G-28 status-based .gitattributes detection survives pipefail scenarios"
+else
+  fail "G-28 status-based .gitattributes detection survives pipefail scenarios" "status-based detection did not mark .gitattributes as changed"
+fi
+
+WHITESPACE_RENAME_REPO="$WORK/whitespace-attributes-rename-repo"
+mkdir -p "$WHITESPACE_RENAME_REPO"
+if (
+  cd "$WHITESPACE_RENAME_REPO" &&
+  git init -q &&
+  git config user.name "verification-tools-gates" &&
+  git config user.email "verification-tools@example.invalid" &&
+  git config core.autocrlf false &&
+  printf '*.txt whitespace=tab-in-indent\n' > .gitattributes &&
+  printf 'clean\n' > tracked.txt &&
+  git add .gitattributes tracked.txt &&
+  git commit -q -m "base-with-gitattributes" &&
+  WS_BASE_SHA="$(git rev-parse HEAD)" &&
+  git mv .gitattributes attrs &&
+  printf '\tindented\n' > tracked.txt &&
+  git add attrs tracked.txt &&
+  git commit -q -m "rename-away-gitattributes" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  ! git diff --name-only "$WS_BASE_SHA..$WS_HEAD_SHA" | grep -qE '(^|/)\.gitattributes$'
+); then
+  pass "G-29 name-only .gitattributes detection misses rename-away sources"
+else
+  fail "G-29 name-only .gitattributes detection misses rename-away sources" "name-only unexpectedly detected renamed-away .gitattributes"
+fi
+
+if (
+  cd "$WHITESPACE_RENAME_REPO" &&
+  WS_BASE_SHA="$(git rev-parse HEAD~1)" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  WHITESPACE_CHANGED_PATHS="$(git diff --name-status --no-renames "$WS_BASE_SHA..$WS_HEAD_SHA")" &&
+  WS_ATTR_CHANGED=0 &&
+  while IFS= read -r ws_line; do
+    [ -z "$ws_line" ] && continue
+    ws_path="${ws_line##*	}"
+    case "$ws_path" in
+      .gitattributes|*/.gitattributes)
+        WS_ATTR_CHANGED=1
+        ;;
+    esac
+  done <<EOF
+$WHITESPACE_CHANGED_PATHS
+EOF
+  [ "$WS_ATTR_CHANGED" -eq 1 ]
+); then
+  pass "G-30 status-based .gitattributes detection catches rename-away sources"
+else
+  fail "G-30 status-based .gitattributes detection catches rename-away sources" "status-based detection missed renamed-away .gitattributes"
+fi
+
+WHITESPACE_SUFFIX_REPO="$WORK/whitespace-suffix-path-repo"
+mkdir -p "$WHITESPACE_SUFFIX_REPO"
+if (
+  cd "$WHITESPACE_SUFFIX_REPO" &&
+  git init -q &&
+  git config user.name "verification-tools-gates" &&
+  git config user.email "verification-tools@example.invalid" &&
+  git config core.autocrlf false &&
+  mkdir -p docs &&
+  printf 'clean\n' > tracked.txt &&
+  git add tracked.txt &&
+  git commit -q -m "base-clean" &&
+  WS_BASE_SHA="$(git rev-parse HEAD)" &&
+  printf 'fixture only\n' > docs/foo.gitattributes &&
+  git add docs/foo.gitattributes &&
+  git commit -q -m "head-adds-suffix-only-file" &&
+  WS_HEAD_SHA="$(git rev-parse HEAD)" &&
+  WHITESPACE_CHANGED_PATHS="$(git diff --name-status --no-renames "$WS_BASE_SHA..$WS_HEAD_SHA")" &&
+  WS_ATTR_CHANGED=0 &&
+  while IFS= read -r ws_line; do
+    [ -z "$ws_line" ] && continue
+    ws_path="${ws_line##*	}"
+    case "$ws_path" in
+      .gitattributes|*/.gitattributes)
+        WS_ATTR_CHANGED=1
+        ;;
+    esac
+  done <<EOF
+$WHITESPACE_CHANGED_PATHS
+EOF
+  [ "$WS_ATTR_CHANGED" -eq 0 ] &&
+  printf '%s\n' "$WHITESPACE_CHANGED_PATHS" | grep -qE '\.gitattributes$'
+); then
+  pass "G-31 status-based .gitattributes detection ignores suffix-only regular files"
+else
+  fail "G-31 status-based .gitattributes detection ignores suffix-only regular files" "suffix-only regular file still triggered .gitattributes guard"
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then
   HEAD_SHA="$("$GIT_BIN" rev-parse HEAD 2>/dev/null || printf 'unknown')"
