@@ -1154,6 +1154,7 @@ if top_jobs_index is not None:
                     "8c7e04e0a7acfc3877047e5e4154c3ceda231891e59c484b778051d961f77ff9",
                     "f7f87489b2d30cd8c0f90312f26c949a1cbe25de94a1a2fd4562d1b7d68fcef1",
                     "2ea9633120d8f905ca47d4acb886726f1f9a04d47e95aaa286852c018b4f7285",
+                    "6202c6878f64902db6d5b5c8bc02eba031c31fefef2ca6541641e737e1e94103",
                 }
                 if gate_exec != expected_gate_exec and exec_digest(gate_exec) not in allowed_gate_digests:
                     fail("gate execution step must match the exact strict proof command sequence")
@@ -1172,6 +1173,7 @@ if top_jobs_index is not None:
                     "verify_tracked_workspace_file SECURITY.md",
                     "verify_tracked_workspace_file docs/release-readiness.md",
                     "verify_tracked_workspace_file release/README.md",
+                    "verify_tracked_workspace_file release/BOOTSTRAP.md",
                     "verify_tracked_workspace_file release/fixtures/example-release-manifest.json",
                     "verify_tracked_workspace_file release/fixtures/example-release-manifest.sig",
                     "verify_tracked_workspace_file release/test-public-key.pub",
@@ -1355,6 +1357,7 @@ if top_jobs_index is not None:
                     "d511d151880b1e4cb9a7b8cd62c760a2cbc21528855fe28c151c217755aa2c3c",
                     "93fab5f540b984ae08bc56862bca67e8256bf8fd660549d19dc6c49ffff741f9",
                     "6a32b91d19d4ee85339dff5b3e566c1eff55ba3bae21bcfa2261cc3c6b538b8f",
+                    "e174a090f99962bac91de4c2975560f72454e7719f7d4ca323d513fc32630efc",
                 }
                 if sentinel_exec != expected_sentinel_exec and exec_digest(sentinel_exec) not in allowed_sentinel_digests:
                     fail("sentinel step must match the exact strict proof command sequence")
@@ -1416,6 +1419,7 @@ if top_jobs_index is not None:
                     'cat-file blob "$CHECKOUT_SHA:DISCLAIMER.md"',
                     'cat-file blob "$CHECKOUT_SHA:SECURITY.md"',
                     'cat-file blob "$CHECKOUT_SHA:release/README.md"',
+                    'cat-file blob "$CHECKOUT_SHA:release/BOOTSTRAP.md"',
                     'cat-file blob "$CHECKOUT_SHA:memoriaia/verify/verify-hashchain.py"',
                     'cat-file blob "$CHECKOUT_SHA:memoriaia/verify/verify-release-manifest.py"',
                     'cat-file blob "$CHECKOUT_SHA:verify/verify-hashchain.sh"',

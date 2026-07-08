@@ -217,6 +217,7 @@ jobs:
           verify_tracked_workspace_file SECURITY.md
           verify_tracked_workspace_file docs/release-readiness.md
           verify_tracked_workspace_file release/README.md
+          verify_tracked_workspace_file release/BOOTSTRAP.md
           verify_tracked_workspace_file release/fixtures/example-release-manifest.json
           verify_tracked_workspace_file release/fixtures/example-release-manifest.sig
           verify_tracked_workspace_file release/test-public-key.pub
@@ -235,13 +236,13 @@ jobs:
       - name: G-19 CI anti-theater (run-gates execution proof required)
         if: always()
         env:
-          VT_G19_EXPECTED_RUN_GATES_SHA: "35a101e65373c454dbe45ae1a929bea72e3469ecd4f04511f740b84b56e5761f"
-          VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA: "6cb7442c2860e15e75e9e2018138600909e1419fee46d899cf6b3c1329ae0e06"
+          VT_G19_EXPECTED_RUN_GATES_SHA: "1d58b7606f46a27ae5a1eaa39df9af5c62dda99d8cb244c6b110a658c288bb13"
+          VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA: "bbc21b0c313f093c7965a6fe0c7175e6e8536c907ae40429f40268ff82056a35"
           VT_G19_EXPECTED_WORKSPACE_HELPER_SHA: "e105de0bca00c509bfff6923515cccb9ab416013a20f17ff90a7159c52890a06"
           VT_G19_EXPECTED_VERIFY_PY_SHA: "abedd126eac0227dddad9267d8863d1b3b4921ef0bdc69301f59b9c9d708683b"
           VT_G19_EXPECTED_VERIFY_SH_SHA: "65694b5e0abe95f3322c45ab7c69b597d83121ec14001bdbba8e6e83f2224192"
           VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA: "ed002608e565b853c03f868097e684361e43b49db6ae75f3567b8ef75dfea8ed"
-          VT_G19_EXPECTED_RELEASE_MATERIAL_SHA: "f92515428cc7e616f763e874f5b16c5852bb2f3d98a8daf9a377ad30937c5f22"
+          VT_G19_EXPECTED_RELEASE_MATERIAL_SHA: "196e8203c35e55c161aa2402f822b90c3f1c7f58da24b7509514b65bd3364815"
           VT_G19_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           VT_G19_PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
           VT_G19_CHECKOUT_SHA: ${{ github.sha }}
@@ -377,10 +378,11 @@ jobs:
           RELEASE_MANIFEST_VERIFIER_SHA="$("$GIT_BIN" cat-file blob "$CHECKOUT_SHA:memoriaia/verify/verify-release-manifest.py" | sha256sum | awk '{print $1}')"
           RELEASE_MANIFEST_WRAPPER_SHA="$("$GIT_BIN" cat-file blob "$CHECKOUT_SHA:verify/verify-release-manifest.sh" | sha256sum | awk '{print $1}')"
           RELEASE_README_SHA="$("$GIT_BIN" cat-file blob "$CHECKOUT_SHA:release/README.md" | sha256sum | awk '{print $1}')"
+          RELEASE_BOOTSTRAP_SHA="$("$GIT_BIN" cat-file blob "$CHECKOUT_SHA:release/BOOTSTRAP.md" | sha256sum | awk '{print $1}')"
           RELEASE_MANIFEST_JSON_SHA="$("$GIT_BIN" cat-file blob "$CHECKOUT_SHA:release/fixtures/example-release-manifest.json" | sha256sum | awk '{print $1}')"
           RELEASE_MANIFEST_SIG_SHA="$("$GIT_BIN" cat-file blob "$CHECKOUT_SHA:release/fixtures/example-release-manifest.sig" | sha256sum | awk '{print $1}')"
           RELEASE_TEST_PUBLIC_KEY_SHA="$("$GIT_BIN" cat-file blob "$CHECKOUT_SHA:release/test-public-key.pub" | sha256sum | awk '{print $1}')"
-          RELEASE_MATERIAL_SHA="$(printf '%s  %s\n%s  %s\n%s  %s\n%s  %s\n%s  %s\n%s  %s\n%s  %s\n%s  %s\n%s  %s\n%s  %s\n' "$README_SHA" README.md "$DISCLAIMER_SHA" DISCLAIMER.md "$SECURITY_SHA" SECURITY.md "$RELEASE_READINESS_SHA" docs/release-readiness.md "$RELEASE_MANIFEST_VERIFIER_SHA" memoriaia/verify/verify-release-manifest.py "$RELEASE_MANIFEST_WRAPPER_SHA" verify/verify-release-manifest.sh "$RELEASE_README_SHA" release/README.md "$RELEASE_MANIFEST_JSON_SHA" release/fixtures/example-release-manifest.json "$RELEASE_MANIFEST_SIG_SHA" release/fixtures/example-release-manifest.sig "$RELEASE_TEST_PUBLIC_KEY_SHA" release/test-public-key.pub | sha256sum | awk '{print $1}')"
+          RELEASE_MATERIAL_SHA="$(printf '%s  %s\n%s  %s\n%s  %s\n%s  %s\n%s  %s\n%s  %s\n%s  %s\n%s  %s\n%s  %s\n%s  %s\n%s  %s\n' "$README_SHA" README.md "$DISCLAIMER_SHA" DISCLAIMER.md "$SECURITY_SHA" SECURITY.md "$RELEASE_READINESS_SHA" docs/release-readiness.md "$RELEASE_MANIFEST_VERIFIER_SHA" memoriaia/verify/verify-release-manifest.py "$RELEASE_MANIFEST_WRAPPER_SHA" verify/verify-release-manifest.sh "$RELEASE_README_SHA" release/README.md "$RELEASE_BOOTSTRAP_SHA" release/BOOTSTRAP.md "$RELEASE_MANIFEST_JSON_SHA" release/fixtures/example-release-manifest.json "$RELEASE_MANIFEST_SIG_SHA" release/fixtures/example-release-manifest.sig "$RELEASE_TEST_PUBLIC_KEY_SHA" release/test-public-key.pub | sha256sum | awk '{print $1}')"
           if [ "$RELEASE_MATERIAL_SHA" != "$VT_G19_EXPECTED_RELEASE_MATERIAL_SHA" ]; then
             echo "G-19 FAIL: release material hash mismatch ($RELEASE_MATERIAL_SHA)"
             exit 1

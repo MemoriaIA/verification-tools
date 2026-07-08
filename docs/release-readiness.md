@@ -97,7 +97,9 @@ Negative gates assert that modified manifest bytes, bad signatures, private-key 
 
 ## Maximum Claim After This Packet
 
-## Explicit 9-Point Design Coverage (per CEO_GO_VTOOLS_RELEASE_READINESS_FULL_CAMPAIGN_NO_RELEASE_01 PHASE 1)
+If all gates and audits pass, the maximum claim is that a release-candidate packet is ready for CEO review. Public release, assurance-grade, provenance, package, deployment, and formal approval claims remain forbidden until separately authorized and mechanically proven.
+
+## Explicit 9-Point Design Coverage
 
 1. What a release artifact is — See "Artifact Definition" above.
 2. What the verifier verifies and does not verify — See dedicated sections above.
@@ -108,5 +110,3 @@ Negative gates assert that modified manifest bytes, bad signatures, private-key 
 7. Key custody assumptions and Founder-controlled signing boundary — See "Key Custody".
 8. Exact claims authorized after implementation — See "Maximum Claim After This Packet".
 9. Exact claims still forbidden — See claim_boundary flags and "no_public_release_claim".
-
-This structure was added to achieve exact mission alignment. Gold standard gap closed: previous version lacked explicit 1-9 mapping.
