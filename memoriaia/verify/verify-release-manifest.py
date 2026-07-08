@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -32,6 +33,21 @@ REQUIRED_BOUNDARY = {
 }
 ANCHOR_URI = re.compile(r"^(https://|urn:)[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+$")
 RFC3339_Z = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+PROOF_CRITICAL_GIT_ENV = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CONFIG",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_CONFIG_NOSYSTEM",
+    "GIT_EXEC_PATH",
+    "GIT_NAMESPACE",
+    "GIT_CEILING_DIRECTORIES",
+    "GIT_PAGER",
+)
 
 
 def fail(message: str, code: int = 1) -> None:
@@ -50,10 +66,14 @@ def require_hex64(label: str, value: Any) -> str:
 
 
 def run(cmd: list[str], cwd: Path | None = None, input_bytes: bytes | None = None) -> bytes:
+    env = os.environ.copy()
+    for name in PROOF_CRITICAL_GIT_ENV:
+        env.pop(name, None)
     try:
         completed = subprocess.run(
             cmd,
             cwd=str(cwd) if cwd else None,
+            env=env,
             input=input_bytes,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -177,6 +197,7 @@ def validate_manifest(manifest: dict[str, Any], repo_root: Path, release_mode: b
             fail("release mode requires profile=release-candidate")
         if not isinstance(repo_commit, str) or not HEX40.fullmatch(repo_commit):
             fail("release mode requires repo_commit to be a concrete 40-hex commit")
+        run(["git", "rev-parse", "--verify", f"{repo_commit}^{{commit}}"], cwd=repo_root)
     else:
         if profile not in {"test-only-fixture", "release-candidate"}:
             fail("profile must be test-only-fixture or release-candidate")
@@ -240,7 +261,10 @@ def validate_manifest(manifest: dict[str, Any], repo_root: Path, release_mode: b
     if anchor.get("type") != "head-commitment-v1":
         fail("anchor.type must be head-commitment-v1")
     anchor_status = anchor.get("external_publication")
-    if release_mode and anchor_status in {None, "not_published_test_fixture", "not_published"}:
+    if release_mode and (
+        anchor_status is None
+        or (isinstance(anchor_status, str) and anchor_status in {"not_published_test_fixture", "not_published"})
+    ):
         fail("release mode requires an externally published anchor reference")
     commitment = require_hex64("anchor.commitment_sha256", anchor.get("commitment_sha256"))
     actual_commitment = sha256_bytes(expected_anchor_preimage(manifest))

@@ -600,6 +600,56 @@ m["profile"] = "release-candidate"
 m["repo_commit"] = head
 m["anchor"]["external_publication"] = {
     "type": "external-anchor-v1",
+    "uri": "urn:memoriaia:vtools:test-anchor",
+    "published_at": "2026-07-08T00:00:00Z",
+    "commitment_sha256": "",
+}
+
+def commitment(manifest):
+    tracked = manifest["tracked_files"]
+    snapshot = manifest["snapshot"]
+    text = (
+        "vtools-anchor-v1\n"
+        f"repo={manifest['repo']}\n"
+        f"profile={manifest['profile']}\n"
+        f"repo_commit={manifest['repo_commit']}\n"
+        f"snapshot_sha256={snapshot['sha256']}\n"
+        f"schema_sha256={tracked['memoriaia/schema/vault-schema.sql']['sha256']}\n"
+        f"verifier_sha256={tracked['memoriaia/verify/verify-hashchain.py']['sha256']}\n"
+        f"disclaimer_sha256={tracked['DISCLAIMER.md']['sha256']}\n"
+    )
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+anchor_commitment = commitment(m)
+m["anchor"]["commitment_sha256"] = anchor_commitment
+m["anchor"]["external_publication"]["commitment_sha256"] = anchor_commitment
+json.dump(m, open(target, "w", encoding="utf-8"), separators=(",", ":"))
+PY
+openssl dgst -sha256 -sign "$BAD_RELEASE_KEY" -out "$RELEASE_CANDIDATE_SIG" "$RELEASE_CANDIDATE_MANIFEST"
+if bash "$MANIFEST_SHV" \
+  --manifest "$RELEASE_CANDIDATE_MANIFEST" \
+  --signature "$RELEASE_CANDIDATE_SIG" \
+  --public-key "$BAD_RELEASE_PUB" \
+  --expected-public-key-sha256 "$BAD_RELEASE_PUB_SHA" \
+  --release-mode >"$OUT" 2>&1; then
+  pass "G-18d1a1 release mode accepts valid structured anchor"
+else
+  fail "G-18d1a1 release mode accepts valid structured anchor" "$(tr '\n' ';' <"$OUT")"
+fi
+
+"$PY" - "$MANIFEST_FIXTURE" "$RELEASE_CANDIDATE_MANIFEST" <<'PY'
+import hashlib
+import json
+import subprocess
+import sys
+
+source, target = sys.argv[1], sys.argv[2]
+m = json.load(open(source, "r", encoding="utf-8"))
+head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+m["profile"] = "release-candidate"
+m["repo_commit"] = head
+m["anchor"]["external_publication"] = {
+    "type": "external-anchor-v1",
     "uri": "not-a-valid-anchor-uri",
     "published_at": "2026-07-08T00:00:00Z",
     "commitment_sha256": "",
@@ -635,6 +685,56 @@ if bash "$MANIFEST_SHV" \
   fail "G-18d1b release mode rejects malformed structured anchor" "malformed structured anchor unexpectedly passed"
 else
   pass "G-18d1b release mode rejects malformed structured anchor"
+fi
+
+"$PY" - "$MANIFEST_FIXTURE" "$RELEASE_CANDIDATE_MANIFEST" <<'PY'
+import hashlib
+import json
+import subprocess
+import sys
+
+source, target = sys.argv[1], sys.argv[2]
+head = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip()
+m = json.load(open(source, "r", encoding="utf-8"))
+m["profile"] = "release-candidate"
+m["repo_commit"] = head
+m["anchor"]["external_publication"] = {
+    "type": "external-anchor-v1",
+    "uri": "urn:memoriaia:vtools:test-anchor",
+    "published_at": "2026-07-08T00:00:00Z",
+    "commitment_sha256": "",
+}
+
+def commitment(manifest):
+    tracked = manifest["tracked_files"]
+    snapshot = manifest["snapshot"]
+    text = (
+        "vtools-anchor-v1\n"
+        f"repo={manifest['repo']}\n"
+        f"profile={manifest['profile']}\n"
+        f"repo_commit={manifest['repo_commit']}\n"
+        f"snapshot_sha256={snapshot['sha256']}\n"
+        f"schema_sha256={tracked['memoriaia/schema/vault-schema.sql']['sha256']}\n"
+        f"verifier_sha256={tracked['memoriaia/verify/verify-hashchain.py']['sha256']}\n"
+        f"disclaimer_sha256={tracked['DISCLAIMER.md']['sha256']}\n"
+    )
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+anchor_commitment = commitment(m)
+m["anchor"]["commitment_sha256"] = anchor_commitment
+m["anchor"]["external_publication"]["commitment_sha256"] = anchor_commitment
+json.dump(m, open(target, "w", encoding="utf-8"), separators=(",", ":"))
+PY
+openssl dgst -sha256 -sign "$BAD_RELEASE_KEY" -out "$RELEASE_CANDIDATE_SIG" "$RELEASE_CANDIDATE_MANIFEST"
+if bash "$MANIFEST_SHV" \
+  --manifest "$RELEASE_CANDIDATE_MANIFEST" \
+  --signature "$RELEASE_CANDIDATE_SIG" \
+  --public-key "$BAD_RELEASE_PUB" \
+  --expected-public-key-sha256 "$BAD_RELEASE_PUB_SHA" \
+  --release-mode >"$OUT" 2>&1; then
+  fail "G-18d1c release mode rejects tree object repo_commit" "tree object repo_commit unexpectedly passed"
+else
+  pass "G-18d1c release mode rejects tree object repo_commit"
 fi
 
 "$PY" - "$MANIFEST_FIXTURE" "$RELEASE_CANDIDATE_MANIFEST" "$WORK/outside-snapshot.sql" <<'PY'
@@ -751,6 +851,16 @@ if (
   fail "G-18d3 release mode rejects symlink-parent snapshot escape" "symlink-parent snapshot path unexpectedly passed"
 else
   pass "G-18d3 release mode rejects symlink-parent snapshot escape"
+fi
+
+if env GIT_DIR=/nonexistent GIT_WORK_TREE=/nonexistent GIT_OBJECT_DIRECTORY=/nonexistent \
+  bash "$MANIFEST_SHV" \
+    --manifest "$MANIFEST_FIXTURE" \
+    --signature "$MANIFEST_SIG" \
+    --public-key "$MANIFEST_PUB" >"$OUT" 2>&1; then
+  pass "G-18d4 verifier ignores poisoned git environment"
+else
+  fail "G-18d4 verifier ignores poisoned git environment" "$(tr '\n' ';' <"$OUT")"
 fi
 
 BAD_SIG="$WORK/bad-release-manifest.sig"
@@ -1549,7 +1659,7 @@ if [ "$FAILED" -eq 0 ]; then
   M2_SIG="$WORK/m2-valid-signature.sig"
   openssl genrsa -out "$M2_KEY" 2048 >/dev/null 2>&1
   openssl rsa -in "$M2_KEY" -pubout -out "$M2_PUB" >/dev/null 2>&1
-  python - "$WORK/tampered-manifest.json" <<'PY'
+  "$PY" - "$WORK/tampered-manifest.json" <<'PY'
 import json, sys
 m = json.load(open(sys.argv[1]))
 m["snapshot"]["sha256"] = "0" * 64
