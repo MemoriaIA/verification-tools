@@ -28,9 +28,9 @@ These tools allow any third party to verify the internal hash-chain consistency 
 The same boundary applies to a sufficiently privileged actor who can rewrite the snapshot and recompute the affected hashes. A vault whose newest entries were removed, or whose history was rewritten and rehashed into a new self-consistent chain, will verify as `VALID` with exit code `0`. What *is* detected: non-recomputed edits, broken `prev_hash` links, sequence gaps, partial rewrites, malformed stored hashes, and other inconsistencies inside the exact file being verified.
 
 **Campaign status (under CEO_GO_VTOOLS_RELEASE_READINESS_FULL_CAMPAIGN_NO_RELEASE_01):**  
-Work is underway to implement signed manifest binding and external anchor models. See `RELEASE-READINESS-DESIGN.md` in this repo for the authoritative design.
+Work is underway to implement signed manifest binding and external anchor models. See `docs/release-readiness.md` in this repo for the current design packet.
 
-The verifier now supports `--manifest` (bounded, demo signature only — test keys, fail-closed). Production signing and anchor publication are out of scope for this campaign. All claims remain strictly bounded per the design and the CEO token.
+The repository now includes a bounded signed-manifest verifier with test-only fixture material and fail-closed checks. Production signing and anchor publication are out of scope for this campaign. All claims remain strictly bounded per the design packet and the CEO token.
 
 ---
 
@@ -158,6 +158,19 @@ Chain INVALID — tampering or corruption detected.
 ```bash
 bash verify/verify-hashchain.sh path/to/vault.sqlite
 ```
+
+### Signed manifest verification
+
+The repository also includes a test-only release-candidate manifest verifier:
+
+```bash
+bash verify/verify-release-manifest.sh \
+  --manifest release/fixtures/example-release-manifest.json \
+  --signature release/fixtures/example-release-manifest.sig \
+  --public-key release/test-public-key.pub
+```
+
+The fixture demonstrates detached signature verification, snapshot hashing, Git blob hash binding, and deterministic anchor-commitment recomputation. It uses test-only trust material and records that no external anchor has been published for the fixture.
 
 ### Example fixture
 

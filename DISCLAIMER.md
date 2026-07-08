@@ -12,4 +12,6 @@
 
 **Known limitation.** Hash-chain verification detects non-recomputed edits, broken links, sequence gaps, partial rewrites, malformed stored hashes, and other inconsistencies inside the supplied snapshot. Removal of records from the end of the chain (tail truncation), or any rewrite that recomputes the remaining chain into a new internally consistent state, is not detectable without an externally anchored head commitment, which these tools do not yet include. A truncated or rewritten but internally consistent vault verifies as valid.
 
+**Signed manifest fixture.** The repository includes a test-only signed manifest fixture and verifier. That verifier can check a detached signature, declared snapshot hash, selected Git blob hashes, and a deterministic anchor commitment. The committed fixture is not an externally published anchor and does not change the limitations above.
+
 These tools are provided under the repository's MIT License (see `LICENSE`). A verification result describes the file it was run against — nothing more.

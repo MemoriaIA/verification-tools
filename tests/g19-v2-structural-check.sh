@@ -1153,6 +1153,7 @@ if top_jobs_index is not None:
                     "1a047f357bfa20490e35bf61f4d32c271b286cd40b3430acc20ebb17222e631f",
                     "8c7e04e0a7acfc3877047e5e4154c3ceda231891e59c484b778051d961f77ff9",
                     "f7f87489b2d30cd8c0f90312f26c949a1cbe25de94a1a2fd4562d1b7d68fcef1",
+                    "2ea9633120d8f905ca47d4acb886726f1f9a04d47e95aaa286852c018b4f7285",
                 }
                 if gate_exec != expected_gate_exec and exec_digest(gate_exec) not in allowed_gate_digests:
                     fail("gate execution step must match the exact strict proof command sequence")
@@ -1166,11 +1167,25 @@ if top_jobs_index is not None:
                     'reset --hard "$VT_G19_CHECKOUT_SHA"',
                     "source ",
                     "verify_tracked_workspace_file .github/workflows/ci.yml",
+                    "verify_tracked_workspace_file README.md",
+                    "verify_tracked_workspace_file DISCLAIMER.md",
+                    "verify_tracked_workspace_file SECURITY.md",
+                    "verify_tracked_workspace_file docs/release-readiness.md",
+                    "verify_tracked_workspace_file release/README.md",
+                    "verify_tracked_workspace_file release/fixtures/example-release-manifest.json",
+                    "verify_tracked_workspace_file release/fixtures/example-release-manifest.sig",
+                    "verify_tracked_workspace_file release/test-public-key.pub",
                     "verify_tracked_workspace_file tests/lib/verify-tracked-workspace.sh",
                     "verify_tracked_workspace_file tests/run-gates.sh",
                     "verify_tracked_workspace_file tests/g19-v2-structural-check.sh",
                     "verify_tracked_workspace_file memoriaia/verify/verify-hashchain.py",
+                    "verify_tracked_workspace_file memoriaia/verify/verify-release-manifest.py",
                     "verify_tracked_workspace_file verify/verify-hashchain.sh",
+                    "verify_tracked_workspace_file verify/verify-release-manifest.sh",
+                    "verify_tracked_workspace_file docs/release-readiness.md",
+                    "verify_tracked_workspace_file release/fixtures/example-release-manifest.json",
+                    "verify_tracked_workspace_file release/fixtures/example-release-manifest.sig",
+                    "verify_tracked_workspace_file release/test-public-key.pub",
                     "verify_tracked_workspace_file \"$fixture\"",
                 ):
                     if not any(snippet in line for line in gate_exec):
@@ -1259,6 +1274,7 @@ if top_jobs_index is not None:
             verify_py_hash_pattern = re.compile(r'^if \[ "\$VERIFY_PY_SHA" != "\$VT_G19_EXPECTED_VERIFY_PY_SHA" \]; then$')
             verify_sh_hash_pattern = re.compile(r'^if \[ "\$VERIFY_SH_SHA" != "\$VT_G19_EXPECTED_VERIFY_SH_SHA" \]; then$')
             fixture_hash_pattern = re.compile(r'^if \[ "\$FIXTURE_MANIFEST_SHA" != "\$VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA" \]; then$')
+            release_material_hash_pattern = re.compile(r'^if \[ "\$RELEASE_MATERIAL_SHA" != "\$VT_G19_EXPECTED_RELEASE_MATERIAL_SHA" \]; then$')
             proof_preimage_pattern = re.compile(r'^if \[ "\$PROOF" != "\$EXPECTED_PROOF" \]; then$')
             require_top_level_branch(sentinel_exec, outcome_pattern, "steps.run_gates.outcome")
             require_top_level_branch(sentinel_exec, missing_pattern, "missing execution proof")
@@ -1338,6 +1354,7 @@ if top_jobs_index is not None:
                     "e31864ca935eb2778bcae7f07bfd049524b280a7f6b29a30bf148ba5b94961da",
                     "d511d151880b1e4cb9a7b8cd62c760a2cbc21528855fe28c151c217755aa2c3c",
                     "93fab5f540b984ae08bc56862bca67e8256bf8fd660549d19dc6c49ffff741f9",
+                    "6a32b91d19d4ee85339dff5b3e566c1eff55ba3bae21bcfa2261cc3c6b538b8f",
                 }
                 if sentinel_exec != expected_sentinel_exec and exec_digest(sentinel_exec) not in allowed_sentinel_digests:
                     fail("sentinel step must match the exact strict proof command sequence")
@@ -1353,6 +1370,7 @@ if top_jobs_index is not None:
                     "VERIFY_PY_SHA",
                     "VERIFY_SH_SHA",
                     "FIXTURE_MANIFEST_SHA",
+                    "RELEASE_MATERIAL_SHA",
                 ):
                     count = sum(1 for line in sentinel_exec if re.match(rf'^{material_key}=', line))
                     if count != 1:
@@ -1367,6 +1385,7 @@ if top_jobs_index is not None:
                 require_top_level_branch(sentinel_exec, verify_py_hash_pattern, "Python verifier content hash")
                 require_top_level_branch(sentinel_exec, verify_sh_hash_pattern, "bash verifier content hash")
                 require_top_level_branch(sentinel_exec, fixture_hash_pattern, "G-19 fixture manifest hash")
+                require_top_level_branch(sentinel_exec, release_material_hash_pattern, "release material hash")
                 require_top_level_branch(sentinel_exec, proof_preimage_pattern, "execution proof preimage")
                 sentinel_env = step_env_values(sentinel)
                 expected_event_env = {
@@ -1384,6 +1403,7 @@ if top_jobs_index is not None:
                     "VT_G19_EXPECTED_VERIFY_PY_SHA",
                     "VT_G19_EXPECTED_VERIFY_SH_SHA",
                     "VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA",
+                    "VT_G19_EXPECTED_RELEASE_MATERIAL_SHA",
                 ):
                     if re.fullmatch(r'[0-9a-f]{64}', sentinel_env.get(key, "")) is None:
                         fail(f"sentinel env must define {key} as a 64-hex hash")
@@ -1392,8 +1412,18 @@ if top_jobs_index is not None:
                     'cat-file blob "$CHECKOUT_SHA:tests/g19-v2-structural-check.sh"',
                     'cat-file blob "$CHECKOUT_SHA:tests/lib/verify-tracked-workspace.sh"',
                     'cat-file blob "$CHECKOUT_SHA:.github/workflows/ci.yml"',
+                    'cat-file blob "$CHECKOUT_SHA:README.md"',
+                    'cat-file blob "$CHECKOUT_SHA:DISCLAIMER.md"',
+                    'cat-file blob "$CHECKOUT_SHA:SECURITY.md"',
+                    'cat-file blob "$CHECKOUT_SHA:release/README.md"',
                     'cat-file blob "$CHECKOUT_SHA:memoriaia/verify/verify-hashchain.py"',
+                    'cat-file blob "$CHECKOUT_SHA:memoriaia/verify/verify-release-manifest.py"',
                     'cat-file blob "$CHECKOUT_SHA:verify/verify-hashchain.sh"',
+                    'cat-file blob "$CHECKOUT_SHA:verify/verify-release-manifest.sh"',
+                    'cat-file blob "$CHECKOUT_SHA:docs/release-readiness.md"',
+                    'cat-file blob "$CHECKOUT_SHA:release/fixtures/example-release-manifest.json"',
+                    'cat-file blob "$CHECKOUT_SHA:release/fixtures/example-release-manifest.sig"',
+                    'cat-file blob "$CHECKOUT_SHA:release/test-public-key.pub"',
                     'ls-files \'tests/fixtures/g19-v2/*.yml\'',
                     'cat-file blob "$CHECKOUT_SHA:$fixture"',
                 ):
@@ -1402,7 +1432,7 @@ if top_jobs_index is not None:
                 expected_proof_lines = [line for line in sentinel_exec if line.startswith('EXPECTED_PROOF="$(printf ')]
                 if not expected_proof_lines or "VT_G19_EXECUTED:v4" not in expected_proof_lines[0]:
                     fail("sentinel must recompute v4 VT_G19_EXEC_PROOF preimage")
-                for snippet in ("PR_HEAD:%s", "PR_BASE:%s", "CHECKOUT:%s", "CI_YML:%s", "RUN_GATES:%s", "STRUCTURAL:%s", "WORKSPACE_HELPER:%s", "VERIFY_PY:%s", "VERIFY_SH:%s", "FIXTURES:%s"):
+                for snippet in ("PR_HEAD:%s", "PR_BASE:%s", "CHECKOUT:%s", "CI_YML:%s", "RUN_GATES:%s", "STRUCTURAL:%s", "WORKSPACE_HELPER:%s", "VERIFY_PY:%s", "VERIFY_SH:%s", "FIXTURES:%s", "RELEASE_MATERIAL:%s"):
                     if not any(snippet in line for line in expected_proof_lines):
                         fail(f"sentinel proof preimage must include {snippet}")
 

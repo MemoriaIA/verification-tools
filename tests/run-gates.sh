@@ -211,6 +211,11 @@ export PYTHONIOENCODING=utf-8
 
 PYV="memoriaia/verify/verify-hashchain.py"
 SHV="verify/verify-hashchain.sh"
+MANIFEST_VERIFIER="memoriaia/verify/verify-release-manifest.py"
+MANIFEST_SHV="verify/verify-release-manifest.sh"
+MANIFEST_FIXTURE="release/fixtures/example-release-manifest.json"
+MANIFEST_SIG="release/fixtures/example-release-manifest.sig"
+MANIFEST_PUB="release/test-public-key.pub"
 FIXTURE="memoriaia/fixtures/example-vault.sql"
 ZERO64="0000000000000000000000000000000000000000000000000000000000000000"
 
@@ -331,7 +336,9 @@ fi
 # ---- G-1/G-2: syntax -----------------------------------------------------
 echo "[syntax]"
 "$PY" -m py_compile "$PYV" 2>/dev/null && pass "G-1 python syntax" || fail "G-1 python syntax" "py_compile failed"
+"$PY" -m py_compile "$MANIFEST_VERIFIER" 2>/dev/null && pass "G-1b manifest verifier syntax" || fail "G-1b manifest verifier syntax" "py_compile failed"
 bash -n "$SHV" 2>/dev/null && pass "G-2 bash syntax" || fail "G-2 bash syntax" "bash -n failed"
+bash -n "$MANIFEST_SHV" 2>/dev/null && pass "G-2b manifest wrapper syntax" || fail "G-2b manifest wrapper syntax" "bash -n failed"
 
 # ---- G-3: fixture loads --------------------------------------------------
 echo "[fixture]"
@@ -381,7 +388,7 @@ git check-ignore -v .claude/test >/dev/null 2>&1 && pass "G-14 .gitignore .claud
 
 # ---- G-15: no forbidden claim phrases in public proof surface ------------
 FORBIDDEN='certif(y|ied|ication|ications?)|compliant|compliance|court[- ]admissible|legally binding|enterprise[- ]ready|production[- ]ready|public[- ]ready|audit[- ]passed|prove(s|d)?[[:space:]-]+(the[[:space:]-]+)?truth|tamper[[:space:]-]*proof|prove(s|d)?[[:space:]-]+no[[:space:]-]+deletion|prove(s|d)?[[:space:]-]+(full[[:space:]-]+|vault[[:space:]-]+)?completeness|any[[:space:]-]+alteration|detect(s|ed|ing)?[[:space:]-]+(any[[:space:]-]+)?tamper(ing|ed)?|interior[[:space:]-]+deletion|append[- ]only[[:space:]-]+proof|historical[[:space:]-]+record.*detectable|CISO|NASA'
-G15_TARGETS=(README.md DISCLAIMER.md SECURITY.md memoriaia verify)
+G15_TARGETS=(README.md DISCLAIMER.md SECURITY.md docs release memoriaia verify)
 G15_MISSING=0
 for target in "${G15_TARGETS[@]}"; do
   if ! "$GIT_BIN" ls-files --error-unmatch "$target" >/dev/null 2>&1 && ! "$GIT_BIN" ls-files "$target" | grep -q .; then
@@ -413,7 +420,7 @@ fi
 [ ! -f memoriaia/verify/requirements.txt ] && pass "G-17 no phantom requirements.txt" || fail "G-17 phantom requirements.txt" "unexpected requirements.txt present"
 
 # ---- G-18: no leakage — allowlist + sensitive-pattern denylist (hard fail)
-ALLOWED='^(README\.md|SECURITY\.md|DISCLAIMER\.md|LICENSE|\.gitignore|\.gitattributes|\.github/workflows/ci\.yml|memoriaia/schema/[A-Za-z0-9._-]+\.sql|memoriaia/fixtures/[A-Za-z0-9._-]+\.sql|memoriaia/verify/verify-hashchain\.py|verify/verify-hashchain\.sh|tests/run-gates\.sh|tests/g19-v2-structural-check\.sh|tests/lib/verify-tracked-workspace\.sh|tests/fixtures/g19-v2/(baseline-good|baseline-unrelated-github-output|missing-proof-mutant|mutant-comment-only-sentinel|mutant-continue-on-error|mutant-direct-github-output-proof-write|mutant-folded-subshell-true-paren|mutant-forged-indirect-output-unreachable|mutant-forged-proof-output|mutant-gates-extraction-service-name-collision|mutant-gate-steps-hidden-in-shell-string|mutant-gates-needs-skipped-blocker|mutant-job-default-shell-alias-or-true|mutant-job-default-shell-flow-map-or-true|mutant-job-default-shell-merge-key-or-true|mutant-job-default-shell-or-true|mutant-job-default-shell-run-alias-or-true|mutant-if-false-run|mutant-job-continue-on-error|mutant-job-env-git-work-tree|mutant-job-if-false|mutant-job-if-post-steps-expression|mutant-job-quoted-continue-on-error|mutant-job-quoted-if-false|mutant-job-yaml-alias-continue-on-error|mutant-job-yaml-alias-if-false|mutant-jobs-key-in-block-scalar|mutant-missing-sentinel|mutant-or-true-paren|mutant-or-true|mutant-prestep-bashenv-forged-output|mutant-prestep-github-path-python-poison|mutant-semicolon-true|mutant-sentinel-case-inert-guard|mutant-sentinel-echo-only-failure|mutant-sentinel-exit-in-else-branch|mutant-sentinel-false-and-brace-group|mutant-sentinel-heredoc-inert|mutant-sentinel-heredoc-numeric-delimiter|mutant-sentinel-exit-zero-expression|mutant-sentinel-fake-outcome-comparison|mutant-sentinel-invalid-proof-echo-branch|mutant-sentinel-invalid-proof-elif-exit|mutant-sentinel-invalid-proof-nested-inert-exit|mutant-sentinel-missing-proof-elif-exit|mutant-sentinel-missing-proof-nested-inert-exit|mutant-sentinel-outcome-elif-exit|mutant-sentinel-outcome-nested-inert-exit|mutant-sentinel-proof-array-overwrite|mutant-sentinel-proof-declare-overwrite|mutant-sentinel-proof-nameref-overwrite|mutant-sentinel-proof-parameter-default|mutant-sentinel-proof-overwrite-constant|mutant-sentinel-quoted-continue-on-error|mutant-sentinel-skipped-or-group|mutant-sentinel-split-line-function|mutant-sentinel-step-if-skipped|mutant-sentinel-trap-exit-zero|mutant-sentinel-uncalled-function|mutant-sentinel-unreachable-invalid-proof-guard|mutant-sentinel-unreachable-missing-proof-guard|mutant-sentinel-while-false-inert-guard|mutant-step-env-git-object-directory|mutant-step-if-expression-run|mutant-step-quoted-continue-on-error|mutant-step-quoted-if-run|mutant-workflow-default-shell-alias-or-true|mutant-workflow-default-shell-flow-map-or-true|mutant-workflow-default-shell-merge-key-or-true|mutant-workflow-default-shell-or-true|mutant-workflow-default-shell-run-alias-or-true|mutant-workflow-env-git-dir|skipped-run_gates-mutant)\.yml)$'
+ALLOWED='^(README\.md|SECURITY\.md|DISCLAIMER\.md|LICENSE|\.gitignore|\.gitattributes|\.github/workflows/ci\.yml|docs/release-readiness\.md|release/README\.md|release/test-public-key\.pub|release/fixtures/example-release-manifest\.(json|sig)|memoriaia/schema/[A-Za-z0-9._-]+\.sql|memoriaia/fixtures/[A-Za-z0-9._-]+\.sql|memoriaia/verify/verify-hashchain\.py|memoriaia/verify/verify-release-manifest\.py|verify/verify-hashchain\.sh|verify/verify-release-manifest\.sh|tests/run-gates\.sh|tests/g19-v2-structural-check\.sh|tests/lib/verify-tracked-workspace\.sh|tests/fixtures/g19-v2/(baseline-good|baseline-unrelated-github-output|missing-proof-mutant|mutant-comment-only-sentinel|mutant-continue-on-error|mutant-direct-github-output-proof-write|mutant-folded-subshell-true-paren|mutant-forged-indirect-output-unreachable|mutant-forged-proof-output|mutant-gates-extraction-service-name-collision|mutant-gate-steps-hidden-in-shell-string|mutant-gates-needs-skipped-blocker|mutant-job-default-shell-alias-or-true|mutant-job-default-shell-flow-map-or-true|mutant-job-default-shell-merge-key-or-true|mutant-job-default-shell-or-true|mutant-job-default-shell-run-alias-or-true|mutant-if-false-run|mutant-job-continue-on-error|mutant-job-env-git-work-tree|mutant-job-if-false|mutant-job-if-post-steps-expression|mutant-job-quoted-continue-on-error|mutant-job-quoted-if-false|mutant-job-yaml-alias-continue-on-error|mutant-job-yaml-alias-if-false|mutant-jobs-key-in-block-scalar|mutant-missing-sentinel|mutant-or-true-paren|mutant-or-true|mutant-prestep-bashenv-forged-output|mutant-prestep-github-path-python-poison|mutant-semicolon-true|mutant-sentinel-case-inert-guard|mutant-sentinel-echo-only-failure|mutant-sentinel-exit-in-else-branch|mutant-sentinel-false-and-brace-group|mutant-sentinel-heredoc-inert|mutant-sentinel-heredoc-numeric-delimiter|mutant-sentinel-exit-zero-expression|mutant-sentinel-fake-outcome-comparison|mutant-sentinel-invalid-proof-echo-branch|mutant-sentinel-invalid-proof-elif-exit|mutant-sentinel-invalid-proof-nested-inert-exit|mutant-sentinel-missing-proof-elif-exit|mutant-sentinel-missing-proof-nested-inert-exit|mutant-sentinel-outcome-elif-exit|mutant-sentinel-outcome-nested-inert-exit|mutant-sentinel-proof-array-overwrite|mutant-sentinel-proof-declare-overwrite|mutant-sentinel-proof-nameref-overwrite|mutant-sentinel-proof-parameter-default|mutant-sentinel-proof-overwrite-constant|mutant-sentinel-quoted-continue-on-error|mutant-sentinel-skipped-or-group|mutant-sentinel-split-line-function|mutant-sentinel-step-if-skipped|mutant-sentinel-trap-exit-zero|mutant-sentinel-uncalled-function|mutant-sentinel-unreachable-invalid-proof-guard|mutant-sentinel-unreachable-missing-proof-guard|mutant-sentinel-while-false-inert-guard|mutant-step-env-git-object-directory|mutant-step-if-expression-run|mutant-step-quoted-continue-on-error|mutant-step-quoted-if-run|mutant-workflow-default-shell-alias-or-true|mutant-workflow-default-shell-flow-map-or-true|mutant-workflow-default-shell-merge-key-or-true|mutant-workflow-default-shell-or-true|mutant-workflow-default-shell-run-alias-or-true|mutant-workflow-env-git-dir|skipped-run_gates-mutant)\.yml)$'
 ALLOWED="${ALLOWED/mutant-prestep-bashenv-forged-output|mutant-prestep-github-path-python-poison/mutant-job-env-bashenv-obfuscated-output|mutant-prestep-bashenv-forged-output|mutant-prestep-github-path-chocolatey-poison|mutant-prestep-github-path-python-poison|mutant-prestep-heredoc-github-output-proof-write|mutant-prestep-indirect-github-output-proof-write}"
 ALLOWED="${ALLOWED/mutant-job-env-bashenv-obfuscated-output/mutant-gates-merge-key-bypass|mutant-job-env-bashenv-obfuscated-output}"
 ALLOWED="${ALLOWED/mutant-prestep-indirect-github-output-proof-write/mutant-prestep-computed-github-output-proof-write|mutant-prestep-indirect-github-output-proof-write|mutant-prestep-obfuscated-env-poison}"
@@ -456,7 +463,7 @@ elif [ "$UNEXPECTED_STATUS" -ne 0 ]; then
   UNEXPECTED=""
 fi
 SENSITIVE_STATUS=0
-SENSITIVE="$(grep -iE '\.(sqlite|sqlite3|db|pem|key|env|p12|pfx|crt)$|(^|/)id_(rsa|ed25519)' "$TRACKED_FILES")" || SENSITIVE_STATUS="$?"
+SENSITIVE="$(grep -iE '\.(sqlite|sqlite3|db|pem|key|env|p12|pfx|crt)$|(^|/)id_(rsa|ed25519)|private[-_]?key|secret[-_]?key' "$TRACKED_FILES" | grep -v '^release/test-public-key\.pub$')" || SENSITIVE_STATUS="$?"
 if [ "$SENSITIVE_STATUS" -eq 1 ]; then
   SENSITIVE=""
 elif [ "$SENSITIVE_STATUS" -ne 0 ]; then
@@ -475,6 +482,75 @@ if [ -z "$UNEXPECTED" ] && [ -z "$SENSITIVE" ]; then
 else
   [ -n "$UNEXPECTED" ] && fail "G-18 unexpected tracked file(s)" "$(printf '%s' "$UNEXPECTED" | tr '\n' ';')"
   [ -n "$SENSITIVE" ]  && fail "G-18 sensitive tracked file(s)"  "$(printf '%s' "$SENSITIVE"  | tr '\n' ';')"
+fi
+
+# ---- G-18b: signed release-candidate manifest verifier -------------------
+echo "[release manifest]"
+if bash "$MANIFEST_SHV" \
+  --manifest "$MANIFEST_FIXTURE" \
+  --signature "$MANIFEST_SIG" \
+  --public-key "$MANIFEST_PUB" >"$OUT" 2>&1; then
+  pass "G-18b signed manifest fixture verifies"
+else
+  fail "G-18b signed manifest fixture verifies" "$(tr '\n' ';' <"$OUT")"
+fi
+
+if bash "$MANIFEST_SHV" \
+  --manifest "$MANIFEST_FIXTURE" \
+  --signature "$MANIFEST_SIG" \
+  --public-key "$MANIFEST_PUB" \
+  --release-mode >"$OUT" 2>&1; then
+  fail "G-18c release mode requires external anchor" "test-only fixture unexpectedly passed release mode"
+else
+  pass "G-18c release mode requires external anchor"
+fi
+
+BAD_MANIFEST="$WORK/bad-release-manifest.json"
+cp "$MANIFEST_FIXTURE" "$BAD_MANIFEST"
+"$PY" - "$BAD_MANIFEST" <<'PY'
+import json
+import sys
+path = sys.argv[1]
+data = json.load(open(path, encoding="utf-8"))
+data["snapshot"]["sha256"] = "0" * 64
+with open(path, "w", encoding="utf-8", newline="\n") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PY
+if bash "$MANIFEST_SHV" \
+  --manifest "$BAD_MANIFEST" \
+  --signature "$MANIFEST_SIG" \
+  --public-key "$MANIFEST_PUB" >"$OUT" 2>&1; then
+  fail "G-18d signed manifest rejects modified bytes" "modified manifest unexpectedly passed"
+else
+  pass "G-18d signed manifest rejects modified bytes"
+fi
+
+BAD_SIG="$WORK/bad-release-manifest.sig"
+cp "$MANIFEST_SIG" "$BAD_SIG"
+printf '\000' | dd of="$BAD_SIG" bs=1 seek=0 count=1 conv=notrunc >/dev/null 2>&1
+if bash "$MANIFEST_SHV" \
+  --manifest "$MANIFEST_FIXTURE" \
+  --signature "$BAD_SIG" \
+  --public-key "$MANIFEST_PUB" >"$OUT" 2>&1; then
+  fail "G-18e signed manifest rejects bad signature" "bad signature unexpectedly passed"
+else
+  pass "G-18e signed manifest rejects bad signature"
+fi
+
+BAD_PUB="$WORK/private-key-as-public.pem"
+cat > "$BAD_PUB" <<'EOF'
+-----BEGIN PRIVATE KEY-----
+test fixture must be rejected before cryptographic parsing
+-----END PRIVATE KEY-----
+EOF
+if bash "$MANIFEST_SHV" \
+  --manifest "$MANIFEST_FIXTURE" \
+  --signature "$MANIFEST_SIG" \
+  --public-key "$BAD_PUB" >"$OUT" 2>&1; then
+  fail "G-18f manifest verifier rejects private key material" "private key material unexpectedly passed"
+else
+  pass "G-18f manifest verifier rejects private key material"
 fi
 
 # ---- G-19: CI must invoke run-gates.sh 1:1 (anti-theater) ----------------
@@ -1160,11 +1236,21 @@ if [ "$FAILED" -eq 0 ]; then
   . tests/lib/verify-tracked-workspace.sh
   for proof_file in \
     .github/workflows/ci.yml \
+    README.md \
+    DISCLAIMER.md \
+    SECURITY.md \
+    docs/release-readiness.md \
+    release/README.md \
+    release/fixtures/example-release-manifest.json \
+    release/fixtures/example-release-manifest.sig \
+    release/test-public-key.pub \
     tests/run-gates.sh \
     tests/g19-v2-structural-check.sh \
     tests/lib/verify-tracked-workspace.sh \
     memoriaia/verify/verify-hashchain.py \
-    verify/verify-hashchain.sh
+    memoriaia/verify/verify-release-manifest.py \
+    verify/verify-hashchain.sh \
+    verify/verify-release-manifest.sh
   do
     verify_tracked_workspace_file "$proof_file"
   done
@@ -1189,6 +1275,26 @@ if [ "$FAILED" -eq 0 ]; then
       done > "$fixture_manifest" || return 2
     sha256sum "$fixture_manifest" | awk '{print $1}'
   }
+  release_material_sha256() {
+    release_material_manifest="$WORK/release-material-manifest.txt"
+    : > "$release_material_manifest"
+    for release_file in \
+      README.md \
+      DISCLAIMER.md \
+      SECURITY.md \
+      docs/release-readiness.md \
+      memoriaia/verify/verify-release-manifest.py \
+      verify/verify-release-manifest.sh \
+      release/README.md \
+      release/fixtures/example-release-manifest.json \
+      release/fixtures/example-release-manifest.sig \
+      release/test-public-key.pub
+    do
+      release_sha="$(tracked_blob_sha256 "$release_file")" || exit 2
+      printf '%s  %s\n' "$release_sha" "$release_file"
+    done > "$release_material_manifest" || return 2
+    sha256sum "$release_material_manifest" | awk '{print $1}'
+  }
   RUN_GATES_SHA="$(tracked_blob_sha256 "tests/run-gates.sh")" || exit 2
   STRUCTURAL_CHECK_SHA="$(tracked_blob_sha256 "tests/g19-v2-structural-check.sh")" || exit 2
   CI_YML_SHA="$(tracked_blob_sha256 ".github/workflows/ci.yml")" || exit 2
@@ -1196,10 +1302,11 @@ if [ "$FAILED" -eq 0 ]; then
   VERIFY_PY_SHA="$(tracked_blob_sha256 "memoriaia/verify/verify-hashchain.py")" || exit 2
   VERIFY_SH_SHA="$(tracked_blob_sha256 "verify/verify-hashchain.sh")" || exit 2
   G19_FIXTURE_MANIFEST_SHA="$(fixture_manifest_sha256)" || exit 2
+  RELEASE_MATERIAL_SHA="$(release_material_sha256)" || exit 2
   VT_G19_EXEC_PROOF="$(
-    printf 'VT_G19_EXECUTED:v4\nPR_HEAD:%s\nPR_BASE:%s\nCHECKOUT:%s\nCI_YML:%s\nRUN_GATES:%s\nSTRUCTURAL:%s\nWORKSPACE_HELPER:%s\nVERIFY_PY:%s\nVERIFY_SH:%s\nFIXTURES:%s\n' \
+    printf 'VT_G19_EXECUTED:v4\nPR_HEAD:%s\nPR_BASE:%s\nCHECKOUT:%s\nCI_YML:%s\nRUN_GATES:%s\nSTRUCTURAL:%s\nWORKSPACE_HELPER:%s\nVERIFY_PY:%s\nVERIFY_SH:%s\nFIXTURES:%s\nRELEASE_MATERIAL:%s\n' \
       "$PROOF_PR_HEAD_SHA" "$PROOF_PR_BASE_SHA" "$PROOF_CHECKOUT_SHA" \
-      "$CI_YML_SHA" "$RUN_GATES_SHA" "$STRUCTURAL_CHECK_SHA" "$WORKSPACE_HELPER_SHA" "$VERIFY_PY_SHA" "$VERIFY_SH_SHA" "$G19_FIXTURE_MANIFEST_SHA" |
+      "$CI_YML_SHA" "$RUN_GATES_SHA" "$STRUCTURAL_CHECK_SHA" "$WORKSPACE_HELPER_SHA" "$VERIFY_PY_SHA" "$VERIFY_SH_SHA" "$G19_FIXTURE_MANIFEST_SHA" "$RELEASE_MATERIAL_SHA" |
       sha256sum |
       awk '{print $1}'
   )"
