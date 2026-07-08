@@ -17,7 +17,7 @@ The fixture in `release/fixtures/example-release-manifest.json` uses `profile: t
 
 ## Production Boundary
 
-Production release signing remains Founder-controlled and is not implemented here. This repository must not contain production private keys. A production release-candidate manifest would use `profile: release-candidate`, a concrete commit SHA, an externally published anchor reference, and a public key whose custody is documented outside this test fixture.
+Production release signing remains Founder-controlled and is not implemented here. This repository must not contain production private keys. A production release-candidate manifest would use `profile: release-candidate`, a concrete commit SHA, structured externally published anchor metadata, and a public key whose expected SHA-256 is supplied from an authority outside the manifest.
 
 ## Verification Boundary
 

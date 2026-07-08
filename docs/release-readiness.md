@@ -39,12 +39,13 @@ The manifest is a JSON document that binds a snapshot to verifier materials and 
 - manifest version and type;
 - repository identity;
 - detached RSA/SHA-256 signature over the exact manifest bytes;
+- release-mode public-key SHA-256 against an expected trust-root value supplied outside the manifest;
 - snapshot SHA-256 over bytes on disk;
 - selected Git blob hashes for schema, verifier, and disclaimer files;
 - deterministic anchor commitment recomputation;
 - explicit claim-boundary flags.
 
-The committed fixture uses `profile: test-only-fixture`. The verifier has a `--release-mode` switch that fails closed for this fixture because no external anchor reference is published.
+The committed fixture uses `profile: test-only-fixture`. The verifier has a `--release-mode` switch that fails closed for this fixture because no structured external anchor reference is published and no external trust-root key hash is supplied.
 
 ## External Anchor Model
 
@@ -65,12 +66,13 @@ A later release process may publish this commitment outside the mutable reposito
 Bootstrap trust requires:
 
 - an independently obtained public key;
+- the expected SHA-256 of that public key from an external authority;
 - a detached manifest signature;
 - a concrete repository commit for the release candidate;
 - an external anchor reference for history-sensitive claims;
 - offline verification instructions.
 
-The repository prepares these mechanics, but it does not establish production key custody or release provenance by itself.
+The repository prepares these mechanics, but it does not establish production key custody or release provenance by itself. In release mode, the manifest cannot self-authorize its signing key.
 
 ## Key Custody
 
@@ -93,7 +95,7 @@ bash verify/verify-release-manifest.sh \
   --public-key release/test-public-key.pub
 ```
 
-Negative gates assert that modified manifest bytes, bad signatures, private-key material in the public-key slot, and release mode without an external anchor all fail closed.
+Negative gates assert that modified manifest bytes, bad signatures, private-key material in the public-key slot, untrusted release-mode keys, opaque anchor strings, out-of-repository snapshot paths, and release mode without an external anchor all fail closed.
 
 ## Maximum Claim After This Packet
 

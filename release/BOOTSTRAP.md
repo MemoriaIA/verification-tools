@@ -17,8 +17,9 @@ bash verify/verify-release-manifest.sh \
   --signature release/fixtures/example-release-manifest.sig \
   --public-key release/test-public-key.pub
 
-# 2. (When real anchor is published) Re-run with --release-mode
-# The command must fail closed if the external_publication field is still "not_published_test_fixture"
+# 2. (When real anchor and trust root are published) Re-run with --release-mode
+# The command must fail closed unless --expected-public-key-sha256 is supplied
+# from an authority outside the manifest and external_publication is structured.
 
 # 3. Verify the hash-chain on the supplied vault using the pinned verifier
 python memoriaia/verify/verify-hashchain.py --vault <your-vault.sqlite>

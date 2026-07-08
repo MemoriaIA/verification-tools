@@ -526,6 +526,120 @@ else
   pass "G-18d signed manifest rejects modified bytes"
 fi
 
+RELEASE_CANDIDATE_MANIFEST="$WORK/release-candidate-manifest.json"
+RELEASE_CANDIDATE_SIG="$WORK/release-candidate-manifest.sig"
+BAD_RELEASE_PUB="$WORK/untrusted-release.pub"
+BAD_RELEASE_KEY="$WORK/untrusted-release.key"
+openssl genrsa -out "$BAD_RELEASE_KEY" 2048 >/dev/null 2>&1
+openssl rsa -in "$BAD_RELEASE_KEY" -pubout -out "$BAD_RELEASE_PUB" >/dev/null 2>&1
+"$PY" - "$MANIFEST_FIXTURE" "$RELEASE_CANDIDATE_MANIFEST" <<'PY'
+import hashlib
+import json
+import subprocess
+import sys
+
+source, target = sys.argv[1], sys.argv[2]
+m = json.load(open(source, "r", encoding="utf-8"))
+head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+m["profile"] = "release-candidate"
+m["repo_commit"] = head
+m["anchor"]["external_publication"] = "bogus-anchor-string-with-no-proof-or-url"
+
+def commitment(manifest):
+    tracked = manifest["tracked_files"]
+    snapshot = manifest["snapshot"]
+    text = (
+        "vtools-anchor-v1\n"
+        f"repo={manifest['repo']}\n"
+        f"profile={manifest['profile']}\n"
+        f"repo_commit={manifest['repo_commit']}\n"
+        f"snapshot_sha256={snapshot['sha256']}\n"
+        f"schema_sha256={tracked['memoriaia/schema/vault-schema.sql']['sha256']}\n"
+        f"verifier_sha256={tracked['memoriaia/verify/verify-hashchain.py']['sha256']}\n"
+        f"disclaimer_sha256={tracked['DISCLAIMER.md']['sha256']}\n"
+    )
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+m["anchor"]["commitment_sha256"] = commitment(m)
+json.dump(m, open(target, "w", encoding="utf-8"), separators=(",", ":"))
+PY
+openssl dgst -sha256 -sign "$BAD_RELEASE_KEY" -out "$RELEASE_CANDIDATE_SIG" "$RELEASE_CANDIDATE_MANIFEST"
+if bash "$MANIFEST_SHV" \
+  --manifest "$RELEASE_CANDIDATE_MANIFEST" \
+  --signature "$RELEASE_CANDIDATE_SIG" \
+  --public-key "$BAD_RELEASE_PUB" \
+  --release-mode >"$OUT" 2>&1; then
+  fail "G-18d1 release mode rejects untrusted public key" "untrusted self-signed release manifest unexpectedly passed"
+else
+  pass "G-18d1 release mode rejects untrusted public key"
+fi
+
+BAD_RELEASE_PUB_SHA="$(sha256sum "$BAD_RELEASE_PUB" | awk '{print $1}')"
+if bash "$MANIFEST_SHV" \
+  --manifest "$RELEASE_CANDIDATE_MANIFEST" \
+  --signature "$RELEASE_CANDIDATE_SIG" \
+  --public-key "$BAD_RELEASE_PUB" \
+  --expected-public-key-sha256 "$BAD_RELEASE_PUB_SHA" \
+  --release-mode >"$OUT" 2>&1; then
+  fail "G-18d1a release mode rejects opaque external anchor" "opaque external anchor unexpectedly passed"
+else
+  pass "G-18d1a release mode rejects opaque external anchor"
+fi
+
+"$PY" - "$MANIFEST_FIXTURE" "$RELEASE_CANDIDATE_MANIFEST" "$WORK/outside-snapshot.sql" <<'PY'
+import hashlib
+import json
+import pathlib
+import subprocess
+import sys
+
+source, target, outside_path = sys.argv[1], sys.argv[2], pathlib.Path(sys.argv[3]).resolve()
+outside_path.write_text("outside snapshot\n", encoding="utf-8")
+m = json.load(open(source, "r", encoding="utf-8"))
+head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+m["profile"] = "release-candidate"
+m["repo_commit"] = head
+m["snapshot"]["path"] = str(outside_path)
+m["snapshot"]["sha256"] = hashlib.sha256(outside_path.read_bytes()).hexdigest()
+m["anchor"]["external_publication"] = {
+    "type": "external-anchor-v1",
+    "uri": "https://example.invalid/memoriaia/vtools-anchor",
+    "published_at": "2026-07-08T00:00:00Z",
+    "commitment_sha256": "",
+}
+
+def commitment(manifest):
+    tracked = manifest["tracked_files"]
+    snapshot = manifest["snapshot"]
+    text = (
+        "vtools-anchor-v1\n"
+        f"repo={manifest['repo']}\n"
+        f"profile={manifest['profile']}\n"
+        f"repo_commit={manifest['repo_commit']}\n"
+        f"snapshot_sha256={snapshot['sha256']}\n"
+        f"schema_sha256={tracked['memoriaia/schema/vault-schema.sql']['sha256']}\n"
+        f"verifier_sha256={tracked['memoriaia/verify/verify-hashchain.py']['sha256']}\n"
+        f"disclaimer_sha256={tracked['DISCLAIMER.md']['sha256']}\n"
+    )
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+anchor_commitment = commitment(m)
+m["anchor"]["commitment_sha256"] = anchor_commitment
+m["anchor"]["external_publication"]["commitment_sha256"] = anchor_commitment
+json.dump(m, open(target, "w", encoding="utf-8"), separators=(",", ":"))
+PY
+openssl dgst -sha256 -sign "$BAD_RELEASE_KEY" -out "$RELEASE_CANDIDATE_SIG" "$RELEASE_CANDIDATE_MANIFEST"
+if bash "$MANIFEST_SHV" \
+  --manifest "$RELEASE_CANDIDATE_MANIFEST" \
+  --signature "$RELEASE_CANDIDATE_SIG" \
+  --public-key "$BAD_RELEASE_PUB" \
+  --expected-public-key-sha256 "$BAD_RELEASE_PUB_SHA" \
+  --release-mode >"$OUT" 2>&1; then
+  fail "G-18d2 release mode rejects out-of-repo snapshot path" "absolute snapshot path unexpectedly passed"
+else
+  pass "G-18d2 release mode rejects out-of-repo snapshot path"
+fi
+
 BAD_SIG="$WORK/bad-release-manifest.sig"
 cp "$MANIFEST_SIG" "$BAD_SIG"
 printf '\000' | dd of="$BAD_SIG" bs=1 seek=0 count=1 conv=notrunc >/dev/null 2>&1
@@ -1317,16 +1431,26 @@ if [ "$FAILED" -eq 0 ]; then
 
   # Negative: tampered snapshot hash must fail closed
   cp release/fixtures/example-release-manifest.json "$WORK/tampered-manifest.json"
+  M2_KEY="$WORK/m2-valid-signature.key"
+  M2_PUB="$WORK/m2-valid-signature.pub"
+  M2_SIG="$WORK/m2-valid-signature.sig"
+  openssl genrsa -out "$M2_KEY" 2048 >/dev/null 2>&1
+  openssl rsa -in "$M2_KEY" -pubout -out "$M2_PUB" >/dev/null 2>&1
   python - "$WORK/tampered-manifest.json" <<'PY'
 import json, sys
 m = json.load(open(sys.argv[1]))
 m["snapshot"]["sha256"] = "0" * 64
-json.dump(m, open(sys.argv[1], "w"))
+json.dump(m, open(sys.argv[1], "w"), separators=(",", ":"))
 PY
-  if bash verify/verify-release-manifest.sh --manifest "$WORK/tampered-manifest.json" --signature release/fixtures/example-release-manifest.sig --public-key release/test-public-key.pub >"$OUT" 2>&1; then
+  openssl dgst -sha256 -sign "$M2_KEY" -out "$M2_SIG" "$WORK/tampered-manifest.json"
+  if bash verify/verify-release-manifest.sh --manifest "$WORK/tampered-manifest.json" --signature "$M2_SIG" --public-key "$M2_PUB" >"$OUT" 2>&1; then
     fail "M-2 manifest negative (tampered snapshot) must fail" "unexpected pass"
   else
     pass "M-2 manifest negative (tampered snapshot) correctly failed"
+  fi
+  if [ "$FAILED" -ne 0 ]; then
+    echo "GATE FAILURE(S) DETECTED"
+    exit 1
   fi
   RELEASE_MATERIAL_SHA="$(release_material_sha256)" || exit 2
   VT_G19_EXEC_PROOF="$(
