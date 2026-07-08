@@ -45,7 +45,7 @@ The manifest is a JSON document that binds a snapshot to verifier materials and 
 - deterministic anchor commitment recomputation;
 - explicit claim-boundary flags.
 
-The committed fixture uses `profile: test-only-fixture`. The verifier has a `--release-mode` switch that fails closed for this fixture because no structured external anchor reference is published and no external trust-root key hash is supplied.
+The committed fixture uses `profile: test-only-fixture`. The verifier has a `--release-mode` switch that fails closed for this fixture because no structured external anchor reference is published and no external trust-root key hash is supplied. This campaign prepares the release-candidate verification contract; it does not publish the external anchor or convert the test fixture into a production release artifact.
 
 ## External Anchor Model
 
@@ -59,7 +59,7 @@ The manifest includes a `head-commitment-v1` value. The commitment preimage is d
 - verifier SHA-256;
 - disclaimer SHA-256.
 
-A later release process may publish this commitment outside the mutable repository history. Until then, the fixture records `not_published_test_fixture`, and stronger history claims remain unavailable.
+A later release process may publish this commitment outside the mutable repository history. Until then, the fixture records `not_published_test_fixture`, and stronger history claims remain unavailable. A `release-candidate` manifest must replace this fixture marker with structured external anchor metadata before `--release-mode` can pass, and that metadata remains a reference to separately controlled publication evidence rather than proof that this PR itself published anything.
 
 ## Bootstrap and Provenance Preparation
 
@@ -95,11 +95,11 @@ bash verify/verify-release-manifest.sh \
   --public-key release/test-public-key.pub
 ```
 
-Negative gates assert that modified manifest bytes, bad signatures, private-key material in the public-key slot, untrusted release-mode keys, opaque anchor strings, out-of-repository snapshot paths, and release mode without an external anchor all fail closed.
+Negative gates assert that modified manifest bytes, bad signatures, private-key material in the public-key slot, untrusted release-mode keys, opaque or malformed anchor metadata, out-of-repository snapshot paths including symlink-parent escapes, and release mode without an external anchor all fail closed.
 
 ## Maximum Claim After This Packet
 
-If all gates and audits pass, the maximum claim is that a release-candidate packet is ready for CEO review. Public release, assurance-grade, provenance, package, deployment, and formal approval claims remain forbidden until separately authorized and mechanically proven.
+If all gates and audits pass, the maximum claim is that a release-candidate decision packet is ready for CEO review. That packet may describe the prepared manifest/anchor contract, but it is not itself an external anchor publication. Public release, assurance-grade, provenance, package, deployment, and formal approval claims remain forbidden until separately authorized and mechanically proven.
 
 ## Explicit 9-Point Design Coverage
 

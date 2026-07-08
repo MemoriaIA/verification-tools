@@ -586,6 +586,56 @@ else
   pass "G-18d1a release mode rejects opaque external anchor"
 fi
 
+"$PY" - "$MANIFEST_FIXTURE" "$RELEASE_CANDIDATE_MANIFEST" <<'PY'
+import hashlib
+import json
+import subprocess
+import sys
+
+source, target = sys.argv[1], sys.argv[2]
+m = json.load(open(source, "r", encoding="utf-8"))
+head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+m["profile"] = "release-candidate"
+m["repo_commit"] = head
+m["anchor"]["external_publication"] = {
+    "type": "external-anchor-v1",
+    "uri": "not-a-valid-anchor-uri",
+    "published_at": "2026-07-08T00:00:00Z",
+    "commitment_sha256": "",
+}
+
+def commitment(manifest):
+    tracked = manifest["tracked_files"]
+    snapshot = manifest["snapshot"]
+    text = (
+        "vtools-anchor-v1\n"
+        f"repo={manifest['repo']}\n"
+        f"profile={manifest['profile']}\n"
+        f"repo_commit={manifest['repo_commit']}\n"
+        f"snapshot_sha256={snapshot['sha256']}\n"
+        f"schema_sha256={tracked['memoriaia/schema/vault-schema.sql']['sha256']}\n"
+        f"verifier_sha256={tracked['memoriaia/verify/verify-hashchain.py']['sha256']}\n"
+        f"disclaimer_sha256={tracked['DISCLAIMER.md']['sha256']}\n"
+    )
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+anchor_commitment = commitment(m)
+m["anchor"]["commitment_sha256"] = anchor_commitment
+m["anchor"]["external_publication"]["commitment_sha256"] = anchor_commitment
+json.dump(m, open(target, "w", encoding="utf-8"), separators=(",", ":"))
+PY
+openssl dgst -sha256 -sign "$BAD_RELEASE_KEY" -out "$RELEASE_CANDIDATE_SIG" "$RELEASE_CANDIDATE_MANIFEST"
+if bash "$MANIFEST_SHV" \
+  --manifest "$RELEASE_CANDIDATE_MANIFEST" \
+  --signature "$RELEASE_CANDIDATE_SIG" \
+  --public-key "$BAD_RELEASE_PUB" \
+  --expected-public-key-sha256 "$BAD_RELEASE_PUB_SHA" \
+  --release-mode >"$OUT" 2>&1; then
+  fail "G-18d1b release mode rejects malformed structured anchor" "malformed structured anchor unexpectedly passed"
+else
+  pass "G-18d1b release mode rejects malformed structured anchor"
+fi
+
 "$PY" - "$MANIFEST_FIXTURE" "$RELEASE_CANDIDATE_MANIFEST" "$WORK/outside-snapshot.sql" <<'PY'
 import hashlib
 import json
@@ -638,6 +688,68 @@ if bash "$MANIFEST_SHV" \
   fail "G-18d2 release mode rejects out-of-repo snapshot path" "absolute snapshot path unexpectedly passed"
 else
   pass "G-18d2 release mode rejects out-of-repo snapshot path"
+fi
+
+SYMLINK_PARENT="$WORK/symlink-parent"
+SYMLINK_TARGET="$WORK/symlink-target"
+mkdir -p "$SYMLINK_TARGET"
+printf 'outside through symlink parent\n' > "$SYMLINK_TARGET/snapshot.sql"
+ln -s "$SYMLINK_TARGET" "$SYMLINK_PARENT"
+"$PY" - "$MANIFEST_FIXTURE" "$RELEASE_CANDIDATE_MANIFEST" "symlink-parent/snapshot.sql" "$SYMLINK_TARGET/snapshot.sql" <<'PY'
+import hashlib
+import json
+import pathlib
+import subprocess
+import sys
+
+source, target, manifest_path, actual_path = sys.argv[1], sys.argv[2], sys.argv[3], pathlib.Path(sys.argv[4])
+m = json.load(open(source, "r", encoding="utf-8"))
+head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+m["profile"] = "release-candidate"
+m["repo_commit"] = head
+m["snapshot"]["path"] = manifest_path
+m["snapshot"]["sha256"] = hashlib.sha256(actual_path.read_bytes()).hexdigest()
+m["anchor"]["external_publication"] = {
+    "type": "external-anchor-v1",
+    "uri": "urn:memoriaia:vtools:test-anchor",
+    "published_at": "2026-07-08T00:00:00Z",
+    "commitment_sha256": "",
+}
+
+def commitment(manifest):
+    tracked = manifest["tracked_files"]
+    snapshot = manifest["snapshot"]
+    text = (
+        "vtools-anchor-v1\n"
+        f"repo={manifest['repo']}\n"
+        f"profile={manifest['profile']}\n"
+        f"repo_commit={manifest['repo_commit']}\n"
+        f"snapshot_sha256={snapshot['sha256']}\n"
+        f"schema_sha256={tracked['memoriaia/schema/vault-schema.sql']['sha256']}\n"
+        f"verifier_sha256={tracked['memoriaia/verify/verify-hashchain.py']['sha256']}\n"
+        f"disclaimer_sha256={tracked['DISCLAIMER.md']['sha256']}\n"
+    )
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+anchor_commitment = commitment(m)
+m["anchor"]["commitment_sha256"] = anchor_commitment
+m["anchor"]["external_publication"]["commitment_sha256"] = anchor_commitment
+json.dump(m, open(target, "w", encoding="utf-8"), separators=(",", ":"))
+PY
+openssl dgst -sha256 -sign "$BAD_RELEASE_KEY" -out "$RELEASE_CANDIDATE_SIG" "$RELEASE_CANDIDATE_MANIFEST"
+if (
+  cd "$WORK" &&
+  bash "$ROOT/$MANIFEST_SHV" \
+    --manifest "$RELEASE_CANDIDATE_MANIFEST" \
+    --signature "$RELEASE_CANDIDATE_SIG" \
+    --public-key "$BAD_RELEASE_PUB" \
+    --expected-public-key-sha256 "$BAD_RELEASE_PUB_SHA" \
+    --repo-root "$WORK" \
+    --release-mode >"$OUT" 2>&1
+); then
+  fail "G-18d3 release mode rejects symlink-parent snapshot escape" "symlink-parent snapshot path unexpectedly passed"
+else
+  pass "G-18d3 release mode rejects symlink-parent snapshot escape"
 fi
 
 BAD_SIG="$WORK/bad-release-manifest.sig"

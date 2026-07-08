@@ -13,11 +13,11 @@ A release-candidate manifest binds:
 - a detached signature over the exact manifest bytes;
 - an anchor commitment preimage that can be published outside the repository in a later release process.
 
-The fixture in `release/fixtures/example-release-manifest.json` uses `profile: test-only-fixture`. It is present so the verifier has deterministic positive and negative tests. It does not create an external anchor and does not prove historical completeness.
+The fixture in `release/fixtures/example-release-manifest.json` uses `profile: test-only-fixture`. It is present so the verifier has deterministic positive and negative tests. It does not create an external anchor and does not prove historical completeness. A future `release-candidate` manifest must replace the fixture marker with structured external anchor metadata before `--release-mode` can pass.
 
 ## Production Boundary
 
-Production release signing remains Founder-controlled and is not implemented here. This repository must not contain production private keys. A production release-candidate manifest would use `profile: release-candidate`, a concrete commit SHA, structured externally published anchor metadata, and a public key whose expected SHA-256 is supplied from an authority outside the manifest.
+Production release signing remains Founder-controlled and is not implemented here. This repository must not contain production private keys. A production release-candidate manifest would use `profile: release-candidate`, a concrete commit SHA, structured externally published anchor metadata, and a public key whose expected SHA-256 is supplied from an authority outside the manifest. This PR prepares that contract for CEO review; it does not publish the anchor or create a release artifact.
 
 ## Verification Boundary
 
