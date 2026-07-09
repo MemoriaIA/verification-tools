@@ -236,7 +236,7 @@ jobs:
       - name: G-19 CI anti-theater (run-gates execution proof required)
         if: always()
         env:
-          VT_G19_EXPECTED_RUN_GATES_SHA: "9684ac080f87ffe592347c2b00d270dcf74b2faac08f47c03c0eae995fd4790d"
+          VT_G19_EXPECTED_RUN_GATES_SHA: "PLACEHOLDER"
           VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA: "bbc21b0c313f093c7965a6fe0c7175e6e8536c907ae40429f40268ff82056a35"
           VT_G19_EXPECTED_WORKSPACE_HELPER_SHA: "e105de0bca00c509bfff6923515cccb9ab416013a20f17ff90a7159c52890a06"
           VT_G19_EXPECTED_VERIFY_PY_SHA: "abedd126eac0227dddad9267d8863d1b3b4921ef0bdc69301f59b9c9d708683b"

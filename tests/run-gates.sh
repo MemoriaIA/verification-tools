@@ -753,8 +753,16 @@ fi
 # Annotated tag objects peel via ^{commit} but must not pass as raw repo_commit.
 TAG_NAME="vtools-g18d1d-tag-$$"
 git tag -d "$TAG_NAME" >/dev/null 2>&1 || true
-git tag -a "$TAG_NAME" -m "vtools gate annotated tag" HEAD >/dev/null 2>&1
+if ! git -c user.email="vtools-gate@local" -c user.name="vtools-gate" \
+  tag -a "$TAG_NAME" -m "vtools gate annotated tag" HEAD >/dev/null 2>&1; then
+  fail "G-18d1d release mode rejects annotated tag repo_commit" "could not create annotated tag fixture"
+fi
 TAG_OBJ_SHA="$(git rev-parse "$TAG_NAME")"
+TAG_OBJ_TYPE="$(git cat-file -t "$TAG_OBJ_SHA" 2>/dev/null || true)"
+if ! printf '%s\n' "$TAG_OBJ_SHA" | grep -qE '^[0-9a-f]{40}$' || [ "$TAG_OBJ_TYPE" != "tag" ]; then
+  git tag -d "$TAG_NAME" >/dev/null 2>&1 || true
+  fail "G-18d1d release mode rejects annotated tag repo_commit" "tag object fixture invalid (sha=$TAG_OBJ_SHA type=$TAG_OBJ_TYPE)"
+fi
 "$PY" - "$MANIFEST_FIXTURE" "$RELEASE_CANDIDATE_MANIFEST" "$TAG_OBJ_SHA" <<'PY'
 import hashlib
 import json
