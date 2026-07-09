@@ -565,6 +565,19 @@ m["anchor"]["commitment_sha256"] = commitment(m)
 json.dump(m, open(target, "w", encoding="utf-8"), separators=(",", ":"))
 PY
 openssl dgst -sha256 -sign "$BAD_RELEASE_KEY" -out "$RELEASE_CANDIDATE_SIG" "$RELEASE_CANDIDATE_MANIFEST"
+# P1 lock: release-candidate without --release-mode must fail closed (no trust-root bypass).
+if bash "$MANIFEST_SHV" \
+  --manifest "$RELEASE_CANDIDATE_MANIFEST" \
+  --signature "$RELEASE_CANDIDATE_SIG" \
+  --public-key "$BAD_RELEASE_PUB" >"$OUT" 2>&1; then
+  fail "G-18d0 release-candidate requires --release-mode" "release-candidate unexpectedly passed without --release-mode"
+else
+  if grep -Eq 'profile=release-candidate requires --release-mode' "$OUT"; then
+    pass "G-18d0 release-candidate requires --release-mode"
+  else
+    fail "G-18d0 release-candidate requires --release-mode" "expected release-mode requirement diagnostic; got: $(tr '\n' ';' <"$OUT")"
+  fi
+fi
 if bash "$MANIFEST_SHV" \
   --manifest "$RELEASE_CANDIDATE_MANIFEST" \
   --signature "$RELEASE_CANDIDATE_SIG" \
@@ -791,25 +804,72 @@ else
   pass "G-18d2 release mode rejects out-of-repo snapshot path"
 fi
 
-SYMLINK_PARENT="$WORK/symlink-parent"
-SYMLINK_TARGET="$WORK/symlink-target"
-mkdir -p "$SYMLINK_TARGET"
-printf 'outside through symlink parent\n' > "$SYMLINK_TARGET/snapshot.sql"
-ln -s "$SYMLINK_TARGET" "$SYMLINK_PARENT"
-"$PY" - "$MANIFEST_FIXTURE" "$RELEASE_CANDIDATE_MANIFEST" "symlink-parent/snapshot.sql" "$SYMLINK_TARGET/snapshot.sql" <<'PY'
+# G-18d3: exercise real root escape guard under the absolute repo root.
+# Symlink target must live outside ROOT so resolve() triggers "escapes repository"
+# (not a wrong-root "snapshot file not found" precondition failure).
+# Create the outside payload + directory symlink with the same Python interpreter
+# that runs the verifier so Windows-native resolve() follows the link correctly
+# (Cygwin ln -s targets are not reliably visible to Win32 Python pathlib).
+ESCAPE_LINK_NAME=".tmp-gates-$$-symlink-escape"
+ESCAPE_OUTSIDE_DIR="$(cd "$ROOT/.." && (cygpath -m "$(pwd)" 2>/dev/null || pwd -W 2>/dev/null || pwd))/.tmp-vtools-g18d3-outside-$$"
+ESCAPE_SNAPSHOT_RELPATH="$ESCAPE_LINK_NAME/snapshot.sql"
+cleanup_g18d3() {
+  "$PY" - "$ROOT" "$ESCAPE_LINK_NAME" "$ESCAPE_OUTSIDE_DIR" <<'PY' 2>/dev/null || true
+import pathlib, shutil, sys
+root = pathlib.Path(sys.argv[1])
+link = root / sys.argv[2]
+outside = pathlib.Path(sys.argv[3])
+if link.exists() or link.is_symlink():
+    try:
+        link.unlink()
+    except IsADirectoryError:
+        shutil.rmtree(link, ignore_errors=True)
+    except OSError:
+        shutil.rmtree(link, ignore_errors=True)
+if outside.exists():
+    shutil.rmtree(outside, ignore_errors=True)
+PY
+}
+"$PY" - "$MANIFEST_FIXTURE" "$RELEASE_CANDIDATE_MANIFEST" "$ROOT" "$ESCAPE_LINK_NAME" "$ESCAPE_OUTSIDE_DIR" <<'PY'
 import hashlib
 import json
+import os
 import pathlib
+import shutil
 import subprocess
 import sys
 
-source, target, manifest_path, actual_path = sys.argv[1], sys.argv[2], sys.argv[3], pathlib.Path(sys.argv[4])
+source, target, root_s, link_name, outside_s = sys.argv[1:6]
+root = pathlib.Path(root_s)
+outside = pathlib.Path(outside_s)
+link = root / link_name
+if link.exists() or link.is_symlink():
+    try:
+        link.unlink()
+    except IsADirectoryError:
+        shutil.rmtree(link, ignore_errors=True)
+    except OSError:
+        shutil.rmtree(link, ignore_errors=True)
+if outside.exists():
+    shutil.rmtree(outside, ignore_errors=True)
+outside.mkdir(parents=True, exist_ok=True)
+snap = outside / "snapshot.sql"
+snap.write_text("outside through symlink parent\n", encoding="utf-8")
+os.symlink(str(outside.resolve()), str(link), target_is_directory=True)
+# Prove the escape surface is real under this interpreter before signing.
+resolved = (link / "snapshot.sql").resolve()
+try:
+    resolved.relative_to(root.resolve())
+    raise SystemExit("setup error: symlink did not escape repo root")
+except ValueError:
+    pass
+
 m = json.load(open(source, "r", encoding="utf-8"))
 head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
 m["profile"] = "release-candidate"
 m["repo_commit"] = head
-m["snapshot"]["path"] = manifest_path
-m["snapshot"]["sha256"] = hashlib.sha256(actual_path.read_bytes()).hexdigest()
+m["snapshot"]["path"] = f"{link_name}/snapshot.sql"
+m["snapshot"]["sha256"] = hashlib.sha256(snap.read_bytes()).hexdigest()
 m["anchor"]["external_publication"] = {
     "type": "external-anchor-v1",
     "uri": "urn:memoriaia:vtools:test-anchor",
@@ -838,19 +898,25 @@ m["anchor"]["external_publication"]["commitment_sha256"] = anchor_commitment
 json.dump(m, open(target, "w", encoding="utf-8"), separators=(",", ":"))
 PY
 openssl dgst -sha256 -sign "$BAD_RELEASE_KEY" -out "$RELEASE_CANDIDATE_SIG" "$RELEASE_CANDIDATE_MANIFEST"
-if (
-  cd "$WORK" &&
-  bash "$ROOT/$MANIFEST_SHV" \
-    --manifest "$RELEASE_CANDIDATE_MANIFEST" \
-    --signature "$RELEASE_CANDIDATE_SIG" \
-    --public-key "$BAD_RELEASE_PUB" \
-    --expected-public-key-sha256 "$BAD_RELEASE_PUB_SHA" \
-    --repo-root "$WORK" \
-    --release-mode >"$OUT_ABS" 2>&1
-); then
+# Absolute repo root (wrapper default is the real ROOT). Do not cd into WORK with a
+# relative --repo-root; that previously resolved as $WORK/$WORK and never hit the guard.
+if bash "$MANIFEST_SHV" \
+  --manifest "$RELEASE_CANDIDATE_MANIFEST" \
+  --signature "$RELEASE_CANDIDATE_SIG" \
+  --public-key "$BAD_RELEASE_PUB" \
+  --expected-public-key-sha256 "$BAD_RELEASE_PUB_SHA" \
+  --repo-root "$ROOT" \
+  --release-mode >"$OUT" 2>&1; then
+  cleanup_g18d3
   fail "G-18d3 release mode rejects symlink-parent snapshot escape" "symlink-parent snapshot path unexpectedly passed"
 else
-  pass "G-18d3 release mode rejects symlink-parent snapshot escape"
+  if grep -Eq 'snapshot path escapes repository' "$OUT"; then
+    cleanup_g18d3
+    pass "G-18d3 release mode rejects symlink-parent snapshot escape"
+  else
+    cleanup_g18d3
+    fail "G-18d3 release mode rejects symlink-parent snapshot escape" "expected escape diagnostic; got: $(tr '\n' ';' <"$OUT")"
+  fi
 fi
 
 if env GIT_DIR=/nonexistent GIT_WORK_TREE=/nonexistent GIT_OBJECT_DIRECTORY=/nonexistent \
