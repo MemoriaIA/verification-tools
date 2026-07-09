@@ -327,6 +327,12 @@ def validate_manifest(manifest: dict[str, Any], repo_root: Path, release_mode: b
 
     profile = manifest.get("profile")
     repo_commit = manifest.get("repo_commit")
+    if isinstance(repo_commit, str):
+        repo_commit = repo_commit.strip()
+        # Normalize hex object ids only; keep symbolic HEAD intact.
+        if repo_commit != "HEAD":
+            repo_commit = repo_commit.lower()
+        manifest["repo_commit"] = repo_commit
     # P1: release-candidate always requires --release-mode and its trust checks.
     if profile == "release-candidate":
         if not release_mode:

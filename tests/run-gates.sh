@@ -757,7 +757,9 @@ if ! git -c user.email="vtools-gate@local" -c user.name="vtools-gate" \
   tag -a "$TAG_NAME" -m "vtools gate annotated tag" HEAD >/dev/null 2>&1; then
   fail "G-18d1d release mode rejects annotated tag repo_commit" "could not create annotated tag fixture"
 fi
-TAG_OBJ_SHA="$(git rev-parse "$TAG_NAME")"
+# Force the *tag object* SHA (not the peeled commit).
+TAG_OBJ_SHA="$(git rev-parse "$TAG_NAME^{tag}" 2>/dev/null || git rev-parse "$TAG_NAME")"
+TAG_OBJ_SHA="$(printf '%s' "$TAG_OBJ_SHA" | tr "A-F" "a-f" | tr -d "\r\n")"
 TAG_OBJ_TYPE="$(git cat-file -t "$TAG_OBJ_SHA" 2>/dev/null || true)"
 if ! printf '%s\n' "$TAG_OBJ_SHA" | grep -qE '^[0-9a-f]{40}$' || [ "$TAG_OBJ_TYPE" != "tag" ]; then
   git tag -d "$TAG_NAME" >/dev/null 2>&1 || true
@@ -769,6 +771,7 @@ import json
 import sys
 
 source, target, tag_sha = sys.argv[1], sys.argv[2], sys.argv[3]
+tag_sha = tag_sha.strip().lower()
 m = json.load(open(source, "r", encoding="utf-8"))
 m["profile"] = "release-candidate"
 m["repo_commit"] = tag_sha
@@ -809,7 +812,7 @@ if bash "$MANIFEST_SHV" \
   git tag -d "$TAG_NAME" >/dev/null 2>&1 || true
   fail "G-18d1d release mode rejects annotated tag repo_commit" "annotated tag repo_commit unexpectedly passed"
 else
-  if grep -Eq 'repo_commit must be a commit object' "$OUT"; then
+  if grep -Eq 'repo_commit must be a commit object|release mode requires repo_commit to be a concrete 40-hex commit' "$OUT"; then
     git tag -d "$TAG_NAME" >/dev/null 2>&1 || true
     pass "G-18d1d release mode rejects annotated tag repo_commit"
   else
