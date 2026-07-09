@@ -754,6 +754,7 @@ fi
 TAG_NAME="vtools-g18d1d-tag-$$"
 git tag -d "$TAG_NAME" >/dev/null 2>&1 || true
 if ! git -c user.email="vtools-gate@local" -c user.name="vtools-gate" \
+  -c tag.gpgSign=false -c commit.gpgSign=false \
   tag -a "$TAG_NAME" -m "vtools gate annotated tag" HEAD >/dev/null 2>&1; then
   fail "G-18d1d release mode rejects annotated tag repo_commit" "could not create annotated tag fixture"
 fi

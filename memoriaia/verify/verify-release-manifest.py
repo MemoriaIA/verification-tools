@@ -329,18 +329,18 @@ def validate_manifest(manifest: dict[str, Any], repo_root: Path, release_mode: b
 
     profile = manifest.get("profile")
     repo_commit = manifest.get("repo_commit")
-    if isinstance(repo_commit, str):
-        repo_commit = repo_commit.strip()
-        # Normalize hex object ids only; keep symbolic HEAD intact.
-        if repo_commit != "HEAD":
-            repo_commit = repo_commit.lower()
-        manifest["repo_commit"] = repo_commit
+    # Do not rewrite signed JSON fields. Canonical form only:
+    # - release-mode: lowercase 40-hex commit object
+    # - test-only: exact "HEAD" or lowercase 40-hex
     # P1: release-candidate always requires --release-mode and its trust checks.
     if profile == "release-candidate":
         if not release_mode:
             fail("profile=release-candidate requires --release-mode")
         if not isinstance(repo_commit, str) or not HEX40.fullmatch(repo_commit):
-            fail("release mode requires repo_commit to be a concrete 40-hex commit")
+            fail(
+                "release mode requires repo_commit to be a concrete lowercase "
+                "40-hex commit (non-canonical values are rejected, not rewritten)"
+            )
         # Annotated tags peel via ^{commit}; require the named object itself is a commit.
         require_commit_object(repo_root, repo_commit)
     elif release_mode:
@@ -349,9 +349,12 @@ def validate_manifest(manifest: dict[str, Any], repo_root: Path, release_mode: b
         if profile != "test-only-fixture":
             fail("profile must be test-only-fixture or release-candidate")
         if repo_commit == "HEAD":
-            repo_commit = "HEAD"
+            pass
         elif not isinstance(repo_commit, str) or not HEX40.fullmatch(repo_commit):
-            fail("repo_commit must be HEAD or a concrete 40-hex commit")
+            fail(
+                "repo_commit must be exact HEAD or lowercase 40-hex "
+                "(non-canonical values are rejected, not rewritten)"
+            )
 
     boundary = manifest.get("claim_boundary")
     if not isinstance(boundary, dict):

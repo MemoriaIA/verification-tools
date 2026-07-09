@@ -236,13 +236,13 @@ jobs:
       - name: G-19 CI anti-theater (run-gates execution proof required)
         if: always()
         env:
-          VT_G19_EXPECTED_RUN_GATES_SHA: "fe54256f29b1ba7ea8547f2b4ac6df575db57665b1684605b353c09af391033e"
+          VT_G19_EXPECTED_RUN_GATES_SHA: "860ed47a1818f2cd96c838f2bcdcb979509301db68dc5f5d2dd397d805a8daea"
           VT_G19_EXPECTED_STRUCTURAL_CHECK_SHA: "bbc21b0c313f093c7965a6fe0c7175e6e8536c907ae40429f40268ff82056a35"
           VT_G19_EXPECTED_WORKSPACE_HELPER_SHA: "e105de0bca00c509bfff6923515cccb9ab416013a20f17ff90a7159c52890a06"
           VT_G19_EXPECTED_VERIFY_PY_SHA: "abedd126eac0227dddad9267d8863d1b3b4921ef0bdc69301f59b9c9d708683b"
           VT_G19_EXPECTED_VERIFY_SH_SHA: "65694b5e0abe95f3322c45ab7c69b597d83121ec14001bdbba8e6e83f2224192"
           VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA: "ed002608e565b853c03f868097e684361e43b49db6ae75f3567b8ef75dfea8ed"
-          VT_G19_EXPECTED_RELEASE_MATERIAL_SHA: "b0858534ff235e0ea54e3c23cd1c7975ba4a02ec507854f44189fc26ccb6b38b"
+          VT_G19_EXPECTED_RELEASE_MATERIAL_SHA: "62bca30c5d40e5663a6bf70f3760646e549779afd47dc24d9aa47fa2ec5ab60f"
           VT_G19_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           VT_G19_PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
           VT_G19_CHECKOUT_SHA: ${{ github.sha }}
