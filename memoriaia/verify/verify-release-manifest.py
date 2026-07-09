@@ -108,10 +108,12 @@ def is_trusted_openssl_path(path: Path) -> bool:
     normalized = _normalize_fs_path(path)
     if normalized in _TRUSTED_OPENSSL_NORMALIZED:
         return True
-    # Allow versioned OpenSSL installs under Program Files.
-    if "/program files/openssl" in normalized and normalized.endswith("/openssl.exe"):
-        return True
-    if "/program files (x86)/openssl" in normalized and normalized.endswith("/openssl.exe"):
+    # Versioned OpenSSL under real Program Files roots only (prefix-bound, not substring).
+    # Rejects planted paths like /tmp/program files/openssl/bin/openssl.exe.
+    if normalized.endswith("/openssl.exe") and (
+        normalized.startswith("c:/program files/openssl")
+        or normalized.startswith("c:/program files (x86)/openssl")
+    ):
         return True
     return False
 
