@@ -36,6 +36,7 @@ ANCHOR_URI = re.compile(r"^(https://|urn:)[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+$
 RFC3339_Z = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 PROOF_CRITICAL_GIT_ENV = (
     "GIT_DIR",
+    "GIT_COMMON_DIR",
     "GIT_WORK_TREE",
     "GIT_INDEX_FILE",
     "GIT_OBJECT_DIRECTORY",
@@ -49,6 +50,37 @@ PROOF_CRITICAL_GIT_ENV = (
     "GIT_CEILING_DIRECTORIES",
     "GIT_PAGER",
 )
+# Trusted OpenSSL locations only — PATH entries outside these are ignored.
+_TRUSTED_OPENSSL_NORMALIZED = (
+    "/usr/bin/openssl",
+    "/bin/openssl",
+    "/usr/local/bin/openssl",
+    "/mingw64/bin/openssl",
+    "/mingw64/bin/openssl.exe",
+    "/cmd/openssl",
+    "/cmd/openssl.exe",
+    "/cygdrive/c/cygwin/bin/openssl",
+    "/cygdrive/c/cygwin/bin/openssl.exe",
+    "/cygdrive/c/cygwin64/bin/openssl",
+    "/cygdrive/c/cygwin64/bin/openssl.exe",
+    "c:/cygwin/bin/openssl",
+    "c:/cygwin/bin/openssl.exe",
+    "c:/cygwin64/bin/openssl",
+    "c:/cygwin64/bin/openssl.exe",
+    "c:/program files/openssl-win64/bin/openssl.exe",
+    "c:/program files/openssl/bin/openssl.exe",
+    "c:/program files (x86)/openssl-win32/bin/openssl.exe",
+    "c:/program files (x86)/openssl/bin/openssl.exe",
+    "c:/strawberry/c/bin/openssl.exe",
+)
+# Component-bound Windows Program Files layouts only (rejects openssl-malicious, etc.).
+_PROGRAM_FILES_OPENSSL_EXE = re.compile(
+    r"^c:/program files(?: \(x86\))?/"
+    r"openssl(?:-win64|-win32)?"
+    r"/bin/openssl\.exe$"
+)
+
+_OPENSSL_BIN: str | None = None
 
 
 def fail(message: str, code: int = 1) -> None:
@@ -64,6 +96,75 @@ def require_hex64(label: str, value: Any) -> str:
     if not isinstance(value, str) or not HEX64.fullmatch(value):
         fail(f"{label} must be lowercase 64-hex")
     return value
+
+
+def _normalize_fs_path(path: Path) -> str:
+    return str(path.resolve()).replace("\\", "/").lower()
+
+
+def is_trusted_openssl_path(path: Path) -> bool:
+    try:
+        if not path.is_file():
+            return False
+    except OSError:
+        return False
+    name = path.name.lower()
+    if name not in {"openssl", "openssl.exe"}:
+        return False
+    normalized = _normalize_fs_path(path)
+    if normalized in _TRUSTED_OPENSSL_NORMALIZED:
+        return True
+    # Component-bound Program Files installs only:
+    # c:/program files/openssl/bin/openssl.exe
+    # c:/program files/openssl-win64/bin/openssl.exe
+    # c:/program files (x86)/openssl/bin/openssl.exe
+    # c:/program files (x86)/openssl-win32/bin/openssl.exe
+    # Rejects siblings like c:/program files/openssl-malicious/bin/openssl.exe.
+    if _PROGRAM_FILES_OPENSSL_EXE.fullmatch(normalized):
+        return True
+    return False
+
+
+def resolve_openssl() -> str:
+    """Resolve a trusted OpenSSL binary; ignore untrusted PATH shadow entries."""
+    global _OPENSSL_BIN
+    if _OPENSSL_BIN is not None:
+        return _OPENSSL_BIN
+
+    candidates: list[Path] = []
+    for hard in (
+        Path("/usr/bin/openssl"),
+        Path("/bin/openssl"),
+        Path("/usr/local/bin/openssl"),
+        Path(r"C:\cygwin\bin\openssl.exe"),
+        Path(r"C:\cygwin64\bin\openssl.exe"),
+        Path(r"C:\Program Files\OpenSSL-Win64\bin\openssl.exe"),
+        Path(r"C:\Program Files\OpenSSL\bin\openssl.exe"),
+        Path(r"C:\Strawberry\c\bin\openssl.exe"),
+    ):
+        candidates.append(hard)
+
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        if not directory:
+            continue
+        for name in ("openssl", "openssl.exe"):
+            candidates.append(Path(directory) / name)
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        try:
+            key = _normalize_fs_path(candidate)
+        except (OSError, RuntimeError):
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        if is_trusted_openssl_path(candidate):
+            _OPENSSL_BIN = str(candidate.resolve())
+            return _OPENSSL_BIN
+
+    fail("trusted openssl binary not found (PATH shadow or missing system openssl)", 2)
+    raise AssertionError("unreachable")
 
 
 def run(cmd: list[str], cwd: Path | None = None, input_bytes: bytes | None = None) -> bytes:
@@ -111,6 +212,20 @@ def require_repo_relative_path(label: str, value: Any) -> str:
     return value
 
 
+def json_loads_reject_duplicates(text: str) -> Any:
+    """Parse JSON and fail closed if any object has duplicate property names."""
+
+    def object_pairs_hook(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in out:
+                fail(f"duplicate JSON object key: {key}")
+            out[key] = value
+        return out
+
+    return json.loads(text, object_pairs_hook=object_pairs_hook)
+
+
 def verify_signature_bytes(
     manifest_bytes: bytes,
     signature_bytes: bytes,
@@ -138,6 +253,7 @@ def verify_signature_bytes(
         if actual != expected:
             fail(f"public key hash mismatch: {actual}")
 
+    openssl_bin = resolve_openssl()
     # Stable private directory; bytes are the same ones already hashed/parsed.
     with tempfile.TemporaryDirectory(prefix="vtools-manifest-verify-") as tmp:
         tmp_path = Path(tmp)
@@ -149,7 +265,7 @@ def verify_signature_bytes(
         man_path.write_bytes(manifest_bytes)
         run(
             [
-                "openssl",
+                openssl_bin,
                 "dgst",
                 "-sha256",
                 "-verify",
@@ -203,6 +319,13 @@ def expected_anchor_preimage(manifest: dict[str, Any]) -> bytes:
     return text.encode("utf-8")
 
 
+def require_commit_object(repo_root: Path, repo_commit: str) -> None:
+    """Require repo_commit to name a raw commit object (not tag/tree/blob)."""
+    obj_type = git_run(["cat-file", "-t", repo_commit], cwd=repo_root).decode("utf-8").strip()
+    if obj_type != "commit":
+        fail(f"repo_commit must be a commit object, got {obj_type}")
+
+
 def validate_manifest(manifest: dict[str, Any], repo_root: Path, release_mode: bool) -> None:
     if manifest.get("manifest_version") != "v1":
         fail("manifest_version must be v1")
@@ -213,22 +336,32 @@ def validate_manifest(manifest: dict[str, Any], repo_root: Path, release_mode: b
 
     profile = manifest.get("profile")
     repo_commit = manifest.get("repo_commit")
+    # Do not rewrite signed JSON fields. Canonical form only:
+    # - release-mode: lowercase 40-hex commit object
+    # - test-only: exact "HEAD" or lowercase 40-hex
     # P1: release-candidate always requires --release-mode and its trust checks.
     if profile == "release-candidate":
         if not release_mode:
             fail("profile=release-candidate requires --release-mode")
         if not isinstance(repo_commit, str) or not HEX40.fullmatch(repo_commit):
-            fail("release mode requires repo_commit to be a concrete 40-hex commit")
-        git_run(["rev-parse", "--verify", f"{repo_commit}^{{commit}}"], cwd=repo_root)
+            fail(
+                "release mode requires repo_commit to be a concrete lowercase "
+                "40-hex commit (non-canonical values are rejected, not rewritten)"
+            )
+        # Annotated tags peel via ^{commit}; require the named object itself is a commit.
+        require_commit_object(repo_root, repo_commit)
     elif release_mode:
         fail("release mode requires profile=release-candidate")
     else:
         if profile != "test-only-fixture":
             fail("profile must be test-only-fixture or release-candidate")
         if repo_commit == "HEAD":
-            repo_commit = "HEAD"
+            pass
         elif not isinstance(repo_commit, str) or not HEX40.fullmatch(repo_commit):
-            fail("repo_commit must be HEAD or a concrete 40-hex commit")
+            fail(
+                "repo_commit must be exact HEAD or lowercase 40-hex "
+                "(non-canonical values are rejected, not rewritten)"
+            )
 
     boundary = manifest.get("claim_boundary")
     if not isinstance(boundary, dict):
@@ -337,7 +470,9 @@ def main() -> None:
         raw = manifest_path.read_bytes()
         signature_bytes = signature_path.read_bytes()
         public_key_bytes = public_key_path.read_bytes()
-        manifest = json.loads(raw.decode("utf-8"))
+        manifest = json_loads_reject_duplicates(raw.decode("utf-8"))
+    except SystemExit:
+        raise
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         fail(f"manifest/key/signature is not readable as required: {exc}", 2)
     if not isinstance(manifest, dict):
