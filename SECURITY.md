@@ -8,8 +8,11 @@ This repository contains:
 - Append-only enforcement triggers (`memoriaia/schema/append-only-triggers.sql`)
 - Independent hash-chain verification script (`memoriaia/verify/`) and shell compatibility wrapper (`verify/`)
 - Example fixture data (`memoriaia/fixtures/`)
+- Test-only release-candidate manifest fixture and manifest verifier (`release/`, `memoriaia/verify/verify-release-manifest.py`)
 
 This repository does **not** contain the MemoriaIA product, its services, encryption implementation, or any key material. Security reports about product internals should be directed to the private product security contact.
+
+The public key under `release/test-public-key.pub` is test-only fixture material. Production signing key custody is outside this repository.
 
 ## Supported Versions
 
