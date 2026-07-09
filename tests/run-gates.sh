@@ -750,6 +750,66 @@ else
   pass "G-18d1c release mode rejects tree object repo_commit"
 fi
 
+# Annotated tag objects peel via ^{commit} but must not pass as raw repo_commit.
+TAG_NAME="vtools-g18d1d-tag-$$"
+git tag -d "$TAG_NAME" >/dev/null 2>&1 || true
+git tag -a "$TAG_NAME" -m "vtools gate annotated tag" HEAD >/dev/null 2>&1
+TAG_OBJ_SHA="$(git rev-parse "$TAG_NAME")"
+"$PY" - "$MANIFEST_FIXTURE" "$RELEASE_CANDIDATE_MANIFEST" "$TAG_OBJ_SHA" <<'PY'
+import hashlib
+import json
+import sys
+
+source, target, tag_sha = sys.argv[1], sys.argv[2], sys.argv[3]
+m = json.load(open(source, "r", encoding="utf-8"))
+m["profile"] = "release-candidate"
+m["repo_commit"] = tag_sha
+m["anchor"]["external_publication"] = {
+    "type": "external-anchor-v1",
+    "uri": "urn:memoriaia:vtools:test-anchor",
+    "published_at": "2026-07-08T00:00:00Z",
+    "commitment_sha256": "",
+}
+
+def commitment(manifest):
+    tracked = manifest["tracked_files"]
+    snapshot = manifest["snapshot"]
+    text = (
+        "vtools-anchor-v1\n"
+        f"repo={manifest['repo']}\n"
+        f"profile={manifest['profile']}\n"
+        f"repo_commit={manifest['repo_commit']}\n"
+        f"snapshot_sha256={snapshot['sha256']}\n"
+        f"schema_sha256={tracked['memoriaia/schema/vault-schema.sql']['sha256']}\n"
+        f"verifier_sha256={tracked['memoriaia/verify/verify-hashchain.py']['sha256']}\n"
+        f"disclaimer_sha256={tracked['DISCLAIMER.md']['sha256']}\n"
+    )
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+anchor_commitment = commitment(m)
+m["anchor"]["commitment_sha256"] = anchor_commitment
+m["anchor"]["external_publication"]["commitment_sha256"] = anchor_commitment
+json.dump(m, open(target, "w", encoding="utf-8"), separators=(",", ":"))
+PY
+openssl dgst -sha256 -sign "$BAD_RELEASE_KEY" -out "$RELEASE_CANDIDATE_SIG" "$RELEASE_CANDIDATE_MANIFEST"
+if bash "$MANIFEST_SHV" \
+  --manifest "$RELEASE_CANDIDATE_MANIFEST" \
+  --signature "$RELEASE_CANDIDATE_SIG" \
+  --public-key "$BAD_RELEASE_PUB" \
+  --expected-public-key-sha256 "$BAD_RELEASE_PUB_SHA" \
+  --release-mode >"$OUT" 2>&1; then
+  git tag -d "$TAG_NAME" >/dev/null 2>&1 || true
+  fail "G-18d1d release mode rejects annotated tag repo_commit" "annotated tag repo_commit unexpectedly passed"
+else
+  if grep -Eq 'repo_commit must be a commit object' "$OUT"; then
+    git tag -d "$TAG_NAME" >/dev/null 2>&1 || true
+    pass "G-18d1d release mode rejects annotated tag repo_commit"
+  else
+    git tag -d "$TAG_NAME" >/dev/null 2>&1 || true
+    fail "G-18d1d release mode rejects annotated tag repo_commit" "expected commit-object diagnostic; got: $(tr '\n' ';' <"$OUT")"
+  fi
+fi
+
 "$PY" - "$MANIFEST_FIXTURE" "$RELEASE_CANDIDATE_MANIFEST" "$WORK/outside-snapshot.sql" <<'PY'
 import hashlib
 import json
@@ -927,6 +987,85 @@ if env GIT_DIR=/nonexistent GIT_WORK_TREE=/nonexistent GIT_OBJECT_DIRECTORY=/non
   pass "G-18d4 verifier ignores poisoned git environment"
 else
   fail "G-18d4 verifier ignores poisoned git environment" "$(tr '\n' ';' <"$OUT")"
+fi
+
+if env GIT_COMMON_DIR=/nonexistent \
+  bash "$MANIFEST_SHV" \
+    --manifest "$MANIFEST_FIXTURE" \
+    --signature "$MANIFEST_SIG" \
+    --public-key "$MANIFEST_PUB" >"$OUT" 2>&1; then
+  pass "G-18d4b verifier ignores poisoned GIT_COMMON_DIR"
+else
+  fail "G-18d4b verifier ignores poisoned GIT_COMMON_DIR" "$(tr '\n' ';' <"$OUT")"
+fi
+
+# PATH-shadowed openssl must not be used; bad signatures must still fail closed.
+FAKE_OPENSSL_DIR="$WORK/fake-openssl-bin"
+mkdir -p "$FAKE_OPENSSL_DIR"
+cat > "$FAKE_OPENSSL_DIR/openssl" <<'SH'
+#!/usr/bin/env bash
+# Malicious PATH openssl: pretends every signature verifies.
+echo "Verified OK"
+exit 0
+SH
+chmod +x "$FAKE_OPENSSL_DIR/openssl"
+# Also cover Windows-style name if the harness resolves .exe first.
+cp "$FAKE_OPENSSL_DIR/openssl" "$FAKE_OPENSSL_DIR/openssl.exe" 2>/dev/null || true
+chmod +x "$FAKE_OPENSSL_DIR/openssl.exe" 2>/dev/null || true
+BAD_SIG_SHADOW="$WORK/bad-release-manifest-shadow.sig"
+cp "$MANIFEST_SIG" "$BAD_SIG_SHADOW"
+printf '\000' | dd of="$BAD_SIG_SHADOW" bs=1 seek=0 count=1 conv=notrunc >/dev/null 2>&1
+if (
+  PATH="$FAKE_OPENSSL_DIR:$PATH"
+  bash "$MANIFEST_SHV" \
+    --manifest "$MANIFEST_FIXTURE" \
+    --signature "$BAD_SIG_SHADOW" \
+    --public-key "$MANIFEST_PUB" >"$OUT" 2>&1
+); then
+  fail "G-18d5 trusted openssl rejects PATH shadow for bad signature" "PATH-shadowed openssl accepted a bad signature"
+else
+  pass "G-18d5 trusted openssl rejects PATH shadow for bad signature"
+fi
+# Good fixture must still verify when PATH is poisoned with a shadow binary.
+if (
+  PATH="$FAKE_OPENSSL_DIR:$PATH"
+  bash "$MANIFEST_SHV" \
+    --manifest "$MANIFEST_FIXTURE" \
+    --signature "$MANIFEST_SIG" \
+    --public-key "$MANIFEST_PUB" >"$OUT" 2>&1
+); then
+  pass "G-18d5b trusted openssl still verifies with poisoned PATH"
+else
+  fail "G-18d5b trusted openssl still verifies with poisoned PATH" "$(tr '\n' ';' <"$OUT")"
+fi
+
+# Duplicate JSON object keys must fail closed (json.loads would keep the last value).
+DUP_MANIFEST="$WORK/dup-key-manifest.json"
+"$PY" - "$MANIFEST_FIXTURE" "$DUP_MANIFEST" <<'PY'
+import json
+import sys
+source, target = sys.argv[1], sys.argv[2]
+data = json.load(open(source, encoding="utf-8"))
+# Emit a compact object with a duplicated top-level key after a valid prefix.
+body = json.dumps(data, separators=(",", ":"))
+# Inject duplicate "profile" immediately after the opening brace.
+if not body.startswith("{"):
+    raise SystemExit("unexpected manifest shape")
+injected = '{"profile":"evil-duplicate",' + body[1:]
+open(target, "w", encoding="utf-8", newline="\n").write(injected)
+PY
+# Signature is intentionally wrong/unrelated; parser must fail on duplicate keys first.
+if bash "$MANIFEST_SHV" \
+  --manifest "$DUP_MANIFEST" \
+  --signature "$MANIFEST_SIG" \
+  --public-key "$MANIFEST_PUB" >"$OUT" 2>&1; then
+  fail "G-18d6 reject duplicate JSON object keys" "duplicate-key manifest unexpectedly passed"
+else
+  if grep -Eq 'duplicate JSON object key' "$OUT"; then
+    pass "G-18d6 reject duplicate JSON object keys"
+  else
+    fail "G-18d6 reject duplicate JSON object keys" "expected duplicate-key diagnostic; got: $(tr '\n' ';' <"$OUT")"
+  fi
 fi
 
 BAD_SIG="$WORK/bad-release-manifest.sig"

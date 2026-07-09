@@ -3,3 +3,6 @@
 *.sql text eol=lf
 verify/*.sh text eol=lf
 tests/*.sh text eol=lf
+# Signed release fixture material must keep exact committed bytes (no CRLF rewrite).
+release/fixtures/** -text
+release/test-public-key.pub -text
