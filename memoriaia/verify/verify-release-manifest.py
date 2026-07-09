@@ -73,6 +73,12 @@ _TRUSTED_OPENSSL_NORMALIZED = (
     "c:/program files (x86)/openssl/bin/openssl.exe",
     "c:/strawberry/c/bin/openssl.exe",
 )
+# Component-bound Windows Program Files layouts only (rejects openssl-malicious, etc.).
+_PROGRAM_FILES_OPENSSL_EXE = re.compile(
+    r"^c:/program files(?: \(x86\))?/"
+    r"openssl(?:-win64|-win32)?"
+    r"/bin/openssl\.exe$"
+)
 
 _OPENSSL_BIN: str | None = None
 
@@ -108,12 +114,13 @@ def is_trusted_openssl_path(path: Path) -> bool:
     normalized = _normalize_fs_path(path)
     if normalized in _TRUSTED_OPENSSL_NORMALIZED:
         return True
-    # Versioned OpenSSL under real Program Files roots only (prefix-bound, not substring).
-    # Rejects planted paths like /tmp/program files/openssl/bin/openssl.exe.
-    if normalized.endswith("/openssl.exe") and (
-        normalized.startswith("c:/program files/openssl")
-        or normalized.startswith("c:/program files (x86)/openssl")
-    ):
+    # Component-bound Program Files installs only:
+    # c:/program files/openssl/bin/openssl.exe
+    # c:/program files/openssl-win64/bin/openssl.exe
+    # c:/program files (x86)/openssl/bin/openssl.exe
+    # c:/program files (x86)/openssl-win32/bin/openssl.exe
+    # Rejects siblings like c:/program files/openssl-malicious/bin/openssl.exe.
+    if _PROGRAM_FILES_OPENSSL_EXE.fullmatch(normalized):
         return True
     return False
 

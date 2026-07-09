@@ -242,7 +242,7 @@ jobs:
           VT_G19_EXPECTED_VERIFY_PY_SHA: "abedd126eac0227dddad9267d8863d1b3b4921ef0bdc69301f59b9c9d708683b"
           VT_G19_EXPECTED_VERIFY_SH_SHA: "65694b5e0abe95f3322c45ab7c69b597d83121ec14001bdbba8e6e83f2224192"
           VT_G19_EXPECTED_FIXTURE_MANIFEST_SHA: "ed002608e565b853c03f868097e684361e43b49db6ae75f3567b8ef75dfea8ed"
-          VT_G19_EXPECTED_RELEASE_MATERIAL_SHA: "62bca30c5d40e5663a6bf70f3760646e549779afd47dc24d9aa47fa2ec5ab60f"
+          VT_G19_EXPECTED_RELEASE_MATERIAL_SHA: "8f3c8f0770444e3c3d41779d90b153a96fb0e11497262dc48375d32ee6ea30d4"
           VT_G19_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           VT_G19_PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
           VT_G19_CHECKOUT_SHA: ${{ github.sha }}
